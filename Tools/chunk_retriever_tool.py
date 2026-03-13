@@ -35,7 +35,7 @@ def get_embeddings(input_text: str) -> list:
         return []
    
 
-def search_similar_docs(embedding_vector , top_k=5) -> list:
+def search_similar_docs_chunk(embedding_vector , top_k=5) -> list:
     try:
         # Connection Configuration
         conn = psycopg2.connect(
@@ -86,7 +86,7 @@ def main():
         print("Failed to generate embedding vector.")
         return
     
-    result = search_similar_docs(embedding_vector , top_k=1)
+    result = search_similar_docs_chunk(embedding_vector , top_k=1)
     if result:
         print("Search results:")
         for row in result:

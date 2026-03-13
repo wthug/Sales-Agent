@@ -70,7 +70,7 @@ def main():
                         status_placeholder.error("Couldn't complete due to error: " + str(result['error']))
                     else:
                         status_placeholder.success("Done! " + result["res"])
-                        if "errors" in result and result["errors"]:
+                        if "errors" in result:
                             st.warning("Some chunks had errors: " + str(result["errors"]))
                 except Exception as e:
                     status_placeholder.error("Couldn't complete due to error: " + str(e))

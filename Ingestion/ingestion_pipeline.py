@@ -31,15 +31,24 @@ def generate_summary(input_text: str) -> str:
             temperature=0.7
         )
         prompt = PromptTemplate(
-            input_variables=["text"],
-            template="""
-            Read the following text carefully. 
-            Generate a comprehensive summary of approximately 300 words that captures all key points and essential details.
+        input_variables=["text"],
+        template="""
+            ### ROLE
+            You are a professional Summary Writing Agent. Your expertise lies in distilling complex information into concise, high-impact, and comprehensive summaries.
 
-            Input Text:
+            ### TASK
+            Read the provided input text and generate a professional summary of approximately 300 words. 
+            
+            ### CONSTRAINTS
+            1. DO NOT include any introductory remarks, conversational filler, or explanations (e.g., "Here is the summary" or "This code defines...").
+            2. DO NOT return code, function definitions, or markdown blocks.
+            3. The output must be ONLY the summary itself.
+            4. Return the result as a single, coherent paragraph that captures all key points and essential details.
+
+            ### INPUT TEXT
             {text}
 
-            Return the summary as a single, coherent paragraph that effectively conveys the main ideas and important information from the input text.
+            ### SUMMARY
             """
         )
         chain = prompt | llm
@@ -86,12 +95,12 @@ def storing_summary(summary: str ) -> dict:
         # Store Summary in PostgreSQL
         try:
             store_query = """
-                INSERT INTO all_document_summaries (summary_id , summary_text , summary_embedding ) 
-                VALUES (%s, %s, %s )
+                INSERT INTO all_document_summaries ( summary_text , summary_embedding ) 
+                VALUES ( %s, %s )
             """
             cur.execute(
                 store_query,
-                (6  ,summary, summary_embeddings)
+                ( summary, summary_embeddings)
             )
             conn.commit()
             cur.close()
@@ -126,9 +135,8 @@ def storing_chunks(chunks: list) -> dict:
             port=port
         )
         cur = conn.cursor()
-
+        errors = []
         for index, chunk in enumerate(chunks):
-            errors = []
             try:
                 chunk_embeddings = get_embeddings(chunk.page_content)
 
@@ -137,12 +145,12 @@ def storing_chunks(chunks: list) -> dict:
                     continue
                         
                 store_query = """
-                    INSERT INTO all_document_chunks (chunk_id , chunk_index , chunk_text , embedding )  
-                    VALUES (%s, %s, %s , %s )
+                    INSERT INTO all_document_chunks (chunk_index , chunk_text , embedding )  
+                    VALUES ( %s, %s , %s )
                 """
                 cur.execute(
                     store_query,
-                    (index + 1000, index, chunk.page_content, chunk_embeddings)
+                    ( index, chunk.page_content, chunk_embeddings)
                 )
                 conn.commit()
             except Exception as e:
