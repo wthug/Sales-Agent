@@ -3,6 +3,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAI, OpenAIEmbeddings
 from langchain_core.prompts import PromptTemplate
 
+from pgvector.psycopg2 import register_vector
 import psycopg2
 import os
 from dotenv import load_dotenv
@@ -27,6 +28,7 @@ chunks = text_splitter.split_documents(documents)
 def generate_summary(input_text: str) -> str:
     llm = OpenAI(
         api_key=open_api_key,
+        model="gpt-4o-mini",
         temperature=0.7
     )
     prompt = PromptTemplate(
@@ -56,18 +58,59 @@ def get_embeddings(input_text: str) -> list:
     return embedding_vector
 
 
+page_content = " ".join([doc.page_content for doc in documents])
 
-for documnet in documents:
-    page_content = documnet.page_content
-
+# print(type(page_content))  # Print the first 500 characters of the page content for verification
 
 summary = generate_summary(page_content)
-
+# print(type(summary))
 summary_embeddings = get_embeddings(summary)
 
-chunk_embeddings = []
 
-for chunk in chunks:
-    chunk_embeddings.append(get_embeddings(chunk.page_content))
+# Connection Configuration
+conn = psycopg2.connect(
+    dbname=os.getenv("db_name"),
+    user=os.getenv("user"),
+    password=os.getenv("postgresql_password"),
+    host=os.getenv("host"),
+    port=os.getenv("port")
+)
+cur = conn.cursor()
+print("Connected to PostgreSQL successfully!")
+
+# Store Summary in PostgreSQL
+print("Storing Summary in PostgreSQL...")
+
+try:
+    register_vector(conn)
+    cur.execute(
+        "INSERT INTO all_document_summaries (summary_id , summary_text , summary_embedding ) VALUES (%s, %s, %s )",
+        (2  ,summary, summary_embeddings)
+    )
+    conn.commit()
+    print("Summary stored successfully!")
+except Exception as e:
+    print(f"Error storing summary: {e}")
+
+
+# Storing chunks in PostgreSQL
+print("Storing Chunks in PostgreSQL...")
+
+for index, chunk in enumerate(chunks):
+    
+    try:
+        chunk_embeddings = get_embeddings(chunk.page_content)
+        cur.execute(
+            "INSERT INTO all_document_chunks (chunk_id , chunk_index , chunk_text , embedding ) VALUES (%s, %s, %s , %s )",
+            (index + 1, index, chunk.page_content, chunk_embeddings)
+        )
+    except Exception as e:
+        print(f"Error storing chunk {index + 1}: {e}")
+conn.commit()
+
+print("Chunks stored successfully!")
+
+cur.close()
+conn.close()
 
 
