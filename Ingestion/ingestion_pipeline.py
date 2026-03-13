@@ -10,7 +10,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Extracting Variables from .env file
 open_api_key = os.getenv("open_ai_key")
+db_name = os.getenv("db_name")
+user = os.getenv("user")
+postgresql_password = os.getenv("postgresql_password")
+host = os.getenv("host")
+port = os.getenv("port")
+
 
 # Load documents from directory
 loader = DirectoryLoader("../Documents/", glob="**/*.pdf", loader_cls=PyPDFLoader)
@@ -69,11 +76,11 @@ summary_embeddings = get_embeddings(summary)
 
 # Connection Configuration
 conn = psycopg2.connect(
-    dbname=os.getenv("db_name"),
-    user=os.getenv("user"),
-    password=os.getenv("postgresql_password"),
-    host=os.getenv("host"),
-    port=os.getenv("port")
+    dbname=db_name,
+    user=user,
+    password=postgresql_password,
+    host=host,
+    port=port
 )
 cur = conn.cursor()
 print("Connected to PostgreSQL successfully!")
@@ -82,11 +89,17 @@ print("Connected to PostgreSQL successfully!")
 print("Storing Summary in PostgreSQL...")
 
 try:
-    register_vector(conn)
+    
+    search_query = """
+        INSERT INTO all_document_summaries (summary_id , summary_text , summary_embedding ) 
+        VALUES (%s, %s, %s )
+    """
+
     cur.execute(
-        "INSERT INTO all_document_summaries (summary_id , summary_text , summary_embedding ) VALUES (%s, %s, %s )",
+        search_query,
         (2  ,summary, summary_embeddings)
     )
+
     conn.commit()
     print("Summary stored successfully!")
 except Exception as e:
@@ -100,8 +113,14 @@ for index, chunk in enumerate(chunks):
     
     try:
         chunk_embeddings = get_embeddings(chunk.page_content)
+        
+        search_query = """
+            INSERT INTO all_document_chunks (chunk_id , chunk_index , chunk_text , embedding )  
+            VALUES (%s, %s, %s , %s )
+        """
+        
         cur.execute(
-            "INSERT INTO all_document_chunks (chunk_id , chunk_index , chunk_text , embedding ) VALUES (%s, %s, %s , %s )",
+            search_query,
             (index + 1, index, chunk.page_content, chunk_embeddings)
         )
     except Exception as e:
