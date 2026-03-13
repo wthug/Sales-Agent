@@ -1,4 +1,5 @@
 streamlit
+pandas
 langchain
 langchain-community
 langchain-text-splitters
@@ -6,3 +7,4 @@ langchain-openai
 langchain-core
 psycopg2-binary
 python-dotenv
+pgvector
