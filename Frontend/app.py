@@ -142,6 +142,10 @@ def main():
                         document_url = data.get("document_sharepoint_url", "N/A")
 
                         ai_reply = answer
+                        if document_name:
+                            ai_reply  += f"\n\n📄 Source: {document_name}"
+                        if document_url:
+                            ai_reply += f"\n🔗 Link: {document_url}"
 
                         print("AI Response:", data["answer"])
                     else:
