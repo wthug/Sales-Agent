@@ -3,6 +3,9 @@ import sys
 
 import pandas as pd
 import streamlit as st
+import requests
+
+url = "http://localhost:8000/api/chat"
 
 # Ensure we can import from project root (for Ingestion module)
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -114,6 +117,10 @@ def main():
         if submitted and user_input.strip():
             st.session_state["messages"].append({"role": "user", "content": user_input.strip()})
 
+            payload = {
+                "messages": st.session_state["messages"].copy()
+            }
+
             with chat_box:
                 st.markdown(
                     f"""
@@ -123,10 +130,33 @@ def main():
                     unsafe_allow_html=True,
                 )
 
+            # Run agent
             with st.spinner("Thinking..."):
-                ai_reply = create_ai_response(user_input.strip())
+                try:
+                    response = requests.post(url, json=payload)
 
-            st.session_state["messages"].append({"role": "assistant", "content": ai_reply})
+                    if response.status_code == 200:
+                        data = response.json()
+                        answer = data["answer"]
+                        document_name = data.get("document_name", "N/A")
+                        document_url = data.get("document_sharepoint_url", "N/A")
+
+                        ai_reply = answer
+
+                        print("AI Response:", data["answer"])
+                    else:
+                        ai_reply = f"⚠️ API Error:-> status code: {response.status_code} , message: {response.text}"
+                        print("Error:", response.status_code, response.text)
+
+                except Exception as e:
+                    ai_reply = f"⚠️ Error: {e}"
+
+
+            # Save assistant message
+            st.session_state["messages"].append({
+                "role": "assistant",
+                "content": ai_reply
+            })
 
             with chat_box:
                 st.markdown(
@@ -136,7 +166,6 @@ def main():
                     """,
                     unsafe_allow_html=True,
                 )
-
 
 if __name__ == "__main__":
     main()

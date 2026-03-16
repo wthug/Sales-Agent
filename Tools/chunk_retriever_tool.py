@@ -10,7 +10,7 @@ import psycopg2
 load_dotenv()
 
 # Extracting Variables from .env file   
-open_api_key = os.getenv("open_ai_key")
+open_api_key = os.getenv("OPENAI_API_KEY")
 db_name = os.getenv("db_name")
 user = os.getenv("user")
 postgresql_password = os.getenv("postgresql_password")
@@ -24,7 +24,7 @@ def get_embeddings(input_text: str) -> list:
     
     try:
         embeddings = OpenAIEmbeddings(
-            api_key=os.getenv("open_ai_key"),
+            api_key=open_api_key,
             model="text-embedding-3-small",
             dimensions=384
         )
@@ -35,7 +35,8 @@ def get_embeddings(input_text: str) -> list:
         return []
    
 
-def search_similar_docs_chunk(embedding_vector , top_k=5) -> list:
+def search_similar_chunk(user_input :str, top_k=5) -> list:
+    """Return the most similar chunks to the user input based on cosine similarity."""
     try:
         # Connection Configuration
         conn = psycopg2.connect(
@@ -48,10 +49,17 @@ def search_similar_docs_chunk(embedding_vector , top_k=5) -> list:
         cur = conn.cursor()
         print("Connected to PostgreSQL successfully!")
 
+        embedding_vector = get_embeddings(user_input)
+        if not embedding_vector:
+            print("Failed to generate embedding vector for chunk.")
+            return {
+                "error": "Failed to generate embeddings for the input text."
+            }
+
         try:
-            # Search Query to find similar documents based on cosine similarity
+            # Search Query
             search_query = """
-                SELECT chunk_id , chunk_text , 1 - (embedding <=> %s::vector ) AS similarity
+                SELECT document_id , chunk_text ,document_name, document_sharepoint_url ,1 - (embedding <=> %s::vector ) AS similarity
                 FROM all_document_chunks
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s;
@@ -59,39 +67,32 @@ def search_similar_docs_chunk(embedding_vector , top_k=5) -> list:
             
             cur.execute(search_query, (embedding_vector , embedding_vector , top_k))
             results = cur.fetchall()
-            
-            print("Search query executed successfully!")
 
             cur.close()
             conn.close()
-            return results
+            
+            return {
+                "output": results
+            }
         
         except Exception as e:
-            print(f"Error executing search query: {e}")
-            return []
+            return {
+                "error" : f"Error executing search query: {e}"
+            }
     
     except Exception as e:
-        print(f"Error connecting to PostgreSQL: {e}")
-        return []
+        return {
+            "error" : f"Error connecting to PostgreSQL: {e}"
+        }
     
 
 def main():
     user_input = input("Enter your query: ")
 
     # Generating embeddings for the user input
-    embedding_vector = get_embeddings(user_input)
-    if embedding_vector:
-        print("Embedding vector generated successfully!")   
-    else:   
-        print("Failed to generate embedding vector.")
-        return
-    
-    result = search_similar_docs_chunk(embedding_vector , top_k=1)
-    if result:
-        print("Search results:")
-        for row in result:
-            print(f"Chunk ID: {row[0]}, Similarity: {row[2]} \n")
-            print(f"Chunk Text: {row[1]}")
+    result = search_similar_chunk(user_input, top_k=1)
+    if result["output"]:
+        print(result["output"][0])
     else:
         print("No results found.")
 

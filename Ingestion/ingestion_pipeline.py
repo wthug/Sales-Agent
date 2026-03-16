@@ -12,15 +12,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Extracting Variables from .env file
-open_api_key = os.getenv("open_ai_key")
+open_api_key = os.getenv("OPENAI_API_KEY")
 db_name = os.getenv("db_name")
 user = os.getenv("user")
 postgresql_password = os.getenv("postgresql_password")
 host = os.getenv("host")
 port = os.getenv("port")
-
-
-
 
 
 def generate_summary(input_text: str) -> str:
@@ -56,6 +53,7 @@ def generate_summary(input_text: str) -> str:
         return summary
     except Exception as e: 
         return ""
+
 
 def get_embeddings(input_text: str) -> list:
     try: 

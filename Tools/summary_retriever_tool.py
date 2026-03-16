@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Extracting Variables from .env file
-open_api_key = os.getenv("open_ai_key")
+open_api_key = os.getenv("OPENAI_API_KEY")
 db_name = os.getenv("db_name") 
 user = os.getenv("user")
 postgresql_password = os.getenv("postgresql_password")
@@ -21,7 +21,7 @@ def get_embeddings(input_text: str) -> list:
 
     try:
         embeddings = OpenAIEmbeddings(
-            api_key=os.getenv("open_ai_key"),
+            api_key=open_api_key,
             model="text-embedding-3-small",
             dimensions=384
         )
@@ -32,8 +32,8 @@ def get_embeddings(input_text: str) -> list:
         return []
 
 
-def search_similar_docs(embedding_vector , top_k=5) -> list:
-    
+def search_similar_summary( input_text: str, top_k=1) -> list:
+    """Return the most similar summary to the input text based on cosine similarity."""
     try:
         # Connection Configuration
         conn = psycopg2.connect(
@@ -46,10 +46,17 @@ def search_similar_docs(embedding_vector , top_k=5) -> list:
         cur = conn.cursor()
         print("Connected to PostgreSQL successfully!")
 
+        embedding_vector = get_embeddings(input_text)
+        if not embedding_vector:
+            print("Failed to generate embedding vector for summary.")
+            return {
+                "error": "Failed to generate embeddings for the input text."
+            }
+
         try:
             # Search Query to find similar documents based on cosine similarity
             search_query = """
-                SELECT summary_id , summary_text , 1 - (summary_embedding <=> %s::vector ) AS similarity
+                SELECT document_id , summary_text , document_name , document_sharepoint_url ,1 - (summary_embedding <=> %s::vector ) AS similarity
                 FROM all_document_summaries
                 ORDER BY summary_embedding <=> %s::vector
                 LIMIT %s;
@@ -57,22 +64,24 @@ def search_similar_docs(embedding_vector , top_k=5) -> list:
             
             cur.execute(search_query, (embedding_vector , embedding_vector , top_k))
             results = cur.fetchall()
-            
-            print("Search query executed successfully!")
 
             cur.close()
             conn.close()
-            return results
+            return {
+                "output": results
+            }
         
         except Exception as e:
-            print(f"Error executing search query: {e}")
             cur.close()
             conn.close()
-            return []    
+            return {
+                "error" : f"Error executing search query: {e}"
+            }  
             
     except Exception as e:
-        print(f"Error connecting to PostgreSQL: {e}")
-        return []
+        return {
+            "error" : f"Error connecting to PostgreSQL: {e}"
+        }
     
 
 def main():
