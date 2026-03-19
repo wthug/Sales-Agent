@@ -1,4 +1,4 @@
-from langchain_community.document_loaders import DirectoryLoader, TextLoader ,PyPDFLoader
+from langchain_community.document_loaders import DirectoryLoader, TextLoader ,PyPDFLoader , Docx2txtLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAI, OpenAIEmbeddings
 from langchain_core.prompts import PromptTemplate
@@ -178,6 +178,8 @@ def process_uploaded_documents(uploaded_file):
         loader = PyPDFLoader(temp_path)
     elif uploaded_file.name.lower().endswith('.txt'):
         loader = TextLoader(temp_path)
+    elif uploaded_file.name.lower().endswith('.docx'):
+        loader = Docx2txtLoader(temp_path)
     else:
         os.unlink(temp_path)
         return {"error": "Unsupported file type. Please upload a PDF or TXT file."}
