@@ -19,6 +19,15 @@ postgresql_password = os.getenv("postgresql_password")
 host = os.getenv("host")
 port = os.getenv("port")
 
+# Connection Configuration
+conn = psycopg2.connect(
+    dbname=db_name,
+    user=user,
+    password=postgresql_password,
+    host=host,
+    port=port
+)
+
 
 def generate_summary(input_text: str) -> str:
     try:
@@ -70,7 +79,7 @@ def get_embeddings(input_text: str) -> list:
 
 
 
-def storing_summary(summary: str ) -> dict:
+def storing_summary(summary: str , document_id , doc: str, sharepoint_url: str) -> dict:
     
     try:
 
@@ -80,35 +89,26 @@ def storing_summary(summary: str ) -> dict:
                 "error": "Failed to generate embeddings for summary."
             }
 
-        # Connection Configuration
-        conn = psycopg2.connect(
-            dbname=db_name,
-            user=user,
-            password=postgresql_password,
-            host=host,
-            port=port
-        )
-        cur = conn.cursor()
+        
 
         # Store Summary in PostgreSQL
         try:
+            cur = conn.cursor()
             store_query = """
-                INSERT INTO all_document_summaries ( summary_text , summary_embedding ) 
-                VALUES ( %s, %s )
+                INSERT INTO all_document_summaries ( document_id, summary_text , summary_embedding , document_name , document_sharepoint_url ) 
+                VALUES ( %s, %s, %s, %s, %s )
             """
             cur.execute(
                 store_query,
-                ( summary, summary_embeddings)
+                ( document_id, summary, summary_embeddings, doc, sharepoint_url )
             )
             conn.commit()
             cur.close()
-            conn.close()
             return {
                 "res": "Summary stored successfully!"
             }
         except Exception as e:
             cur.close()
-            conn.close()
             return {
                 "error" :{e}
             } 
@@ -122,16 +122,9 @@ def storing_summary(summary: str ) -> dict:
 
 # Storing chunks in PostgreSQL
 
-def storing_chunks(chunks: list) -> dict:
+def storing_chunks(chunks: list , document_id , doc: str, sharepoint_url: str) -> dict:
     try:
-        # Connection Configuration
-        conn = psycopg2.connect(
-            dbname=db_name,
-            user=user,
-            password=postgresql_password,
-            host=host,
-            port=port
-        )
+
         cur = conn.cursor()
         errors = []
         for index, chunk in enumerate(chunks):
@@ -143,19 +136,18 @@ def storing_chunks(chunks: list) -> dict:
                     continue
                         
                 store_query = """
-                    INSERT INTO all_document_chunks (chunk_index , chunk_text , embedding )  
-                    VALUES ( %s, %s , %s )
+                    INSERT INTO all_document_chunks ( document_id, chunk_index , chunk_text , embedding , document_name , document_sharepoint_url )  
+                    VALUES ( %s, %s , %s, %s , %s , %s )
                 """
                 cur.execute(
                     store_query,
-                    ( index, chunk.page_content, chunk_embeddings)
+                    ( document_id, index, chunk.page_content, chunk_embeddings, doc, sharepoint_url)
                 )
                 conn.commit()
             except Exception as e:
                 errors.append({"error" : f"Error storing chunk {index + 1} -> {e}"})
         
         cur.close()
-        conn.close()
         return {
             "res": "Chunks stored successfully!",
             "errors": errors
@@ -168,63 +160,115 @@ def storing_chunks(chunks: list) -> dict:
 
 
 
-def process_uploaded_documents(uploaded_file):
+def upload_documents():
     
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as temp_file:
-        temp_file.write(uploaded_file.getvalue())
-        temp_path = temp_file.name
+    docs = []
+    try:
+        cur = conn.cursor()
+        search_query = """
+            SELECT document_id , file_name , sharepoint_url , indexed
+            FROM documents
+            WHERE indexed = FALSE;
+        """
+        cur.execute(search_query)
+        docs = cur.fetchall()
+        cur.close()
+    except Exception as e:
+        cur.close()
+        print("Error Fetching index pending documents : {e} ")
+        return
 
-    if uploaded_file.name.lower().endswith('.pdf'):
-        loader = PyPDFLoader(temp_path)
-    elif uploaded_file.name.lower().endswith('.txt'):
-        loader = TextLoader(temp_path)
-    elif uploaded_file.name.lower().endswith('.docx'):
-        loader = Docx2txtLoader(temp_path)
-    else:
-        os.unlink(temp_path)
-        return {"error": "Unsupported file type. Please upload a PDF or TXT file."}
+    print(len(docs))
 
-    docs = loader.load()
-    os.unlink(temp_path)
 
-    # Extract and chunk text
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100
-    )
+    print(f"\n\nUploading {len(docs)} documents in VectorDB....\n")
 
-    chunks = text_splitter.split_documents(docs)
+    for doc_tuple in docs:
 
-    page_content = " ".join([doc.page_content for doc in docs])
+        document_id , doc, sharepoint_url , indexed = doc_tuple
 
-    # Generate Summary
-    summary = generate_summary(page_content)
-    if summary == "":
-        return {
-            "error": "Failed to generate summary."
-        }
+        if doc.endswith('.pdf'):
+            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=PyPDFLoader)
+        elif doc.endswith('.txt'):
+            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=TextLoader)
+        elif doc.endswith('.docx'):
+            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=Docx2txtLoader)
+        else:
+            print(f"Unsupported file type for {doc}. Skipping.")
+            continue
 
-    # Store summary in PostgreSQL
-    res = storing_summary(summary)
-    if "error" in res:
-        return res
+        
 
-    # Store chunks in PostgreSQL
-    res = storing_chunks(chunks)
-    if "error" in res:
-        return res
+        loaded_doc = loader.load()  
 
-    return {
-        "res": "Ingestion pipeline completed successfully!"
-    }
+        print(f"✅ Loaded {doc} from directory.")
+    
+        # Extract and chunk text
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=800,
+            chunk_overlap=100
+        )
 
+        chunks = text_splitter.split_documents(loaded_doc)
+
+        page_content = " ".join([doc.page_content for doc in loaded_doc])
+
+        # Generate Summary
+        summary = generate_summary(page_content)
+        if summary == "":
+            print(f"Failed to generate summary for {doc}. Skipping storage.")
+            continue
+
+        # Store summary in PostgreSQL
+        res = storing_summary(summary , document_id , doc , sharepoint_url)
+        if "error" in res:
+            print(f"Error storing summary for {doc}: {res['error']}")
+            continue
+        
+
+        # Store chunks in PostgreSQL
+        res = storing_chunks(chunks , document_id , doc ,sharepoint_url)
+        if "error" in res:
+            print(f"Errors storing chunks for {doc}: {res['error']}")
+            continue
+
+        try:
+            cur = conn.cursor()
+            update_query = """
+                UPDATE documents 
+                SET indexed = TRUE , ingestion_status = 'completed' 
+                WHERE file_name = %s
+            """
+            cur.execute(update_query, (doc))
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            cur.close()
+            print(f"Error updating document status for {doc}: {e}")
+
+    conn.close()
+    print("\nAll documents uploaded successfully!\n\n")
+    
 
 
 def main():
     # Load documents from directory
-    loader = DirectoryLoader("../Documents/", glob="**/*.pdf", loader_cls=PyPDFLoader)
-    documents = loader.load()
+    # loader = DirectoryLoader("../Documents/", glob="**/*.docx", loader_cls=Docx2txtLoader)
+    # documents = loader.load()
 
+    file_name = "SAS_Technical Proposal_QNB AI Screening Solution_v0.2.docx"
+    
+    try:
+        loader = DirectoryLoader("downloaded_documents", glob=f"**/{file_name}", loader_cls=Docx2txtLoader)    
+        documents = loader.load()
+    except Exception as e:
+        print(f"Error loading documents: {e}")
+        return {
+            "error": f"Error loading documents: {e}"
+        }
+
+    print(f"✅ Loaded {len(documents)} documents from directory.")
+    
     # Extract and chunk text
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
