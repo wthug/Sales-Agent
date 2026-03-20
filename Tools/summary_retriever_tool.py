@@ -55,8 +55,14 @@ def search_similar_summary( input_text: str, top_k=1) -> list:
 
         try:
             # Search Query to find similar documents based on cosine similarity
+            # search_query = """
+            #     SELECT document_id , summary_text , document_name , document_sharepoint_url ,1 - (summary_embedding <=> %s::vector ) AS similarity
+            #     FROM all_document_summaries
+            #     ORDER BY summary_embedding <=> %s::vector
+            #     LIMIT %s;
+            # """
             search_query = """
-                SELECT document_id , summary_text , document_name , document_sharepoint_url ,1 - (summary_embedding <=> %s::vector ) AS similarity
+                SELECT document_id , summary_text , document_name , 1 - (summary_embedding <=> %s::vector ) AS similarity
                 FROM all_document_summaries
                 ORDER BY summary_embedding <=> %s::vector
                 LIMIT %s;

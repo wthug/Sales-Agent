@@ -178,14 +178,13 @@ def upload_documents():
         print("Error Fetching index pending documents : {e} ")
         return
 
-    print(len(docs))
-
 
     print(f"\n\nUploading {len(docs)} documents in VectorDB....\n")
 
     for doc_tuple in docs:
 
         document_id , doc, sharepoint_url , indexed = doc_tuple
+        
 
         if doc.endswith('.pdf'):
             loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=PyPDFLoader)
@@ -232,6 +231,8 @@ def upload_documents():
             print(f"Errors storing chunks for {doc}: {res['error']}")
             continue
 
+        print(f"Done indexing {doc}")
+
         try:
             cur = conn.cursor()
             update_query = """
@@ -239,7 +240,7 @@ def upload_documents():
                 SET indexed = TRUE , ingestion_status = 'completed' 
                 WHERE file_name = %s
             """
-            cur.execute(update_query, (doc))
+            cur.execute(update_query, (doc.strip(),))
             conn.commit()
             cur.close()
         except Exception as e:
@@ -251,65 +252,5 @@ def upload_documents():
     
 
 
-def main():
-    # Load documents from directory
-    # loader = DirectoryLoader("../Documents/", glob="**/*.docx", loader_cls=Docx2txtLoader)
-    # documents = loader.load()
-
-    file_name = "SAS_Technical Proposal_QNB AI Screening Solution_v0.2.docx"
-    
-    try:
-        loader = DirectoryLoader("downloaded_documents", glob=f"**/{file_name}", loader_cls=Docx2txtLoader)    
-        documents = loader.load()
-    except Exception as e:
-        print(f"Error loading documents: {e}")
-        return {
-            "error": f"Error loading documents: {e}"
-        }
-
-    print(f"✅ Loaded {len(documents)} documents from directory.")
-    
-    # Extract and chunk text
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100
-    )
-
-    chunks = text_splitter.split_documents(documents)
-
-    page_content = " ".join([doc.page_content for doc in documents])
-
-    # Generate Summary
-    summary = generate_summary(page_content)
-    if summary:
-        print("Summary generated successfully!")
-    else:
-        print("Failed to generate summary.")
-        return {
-            "error": "Failed to generate summary."
-        }
-
-    # Store summary in PostgreSQL
-    res = storing_summary(summary)
-    if "error" in res:
-        print(f"Error storing summary: {res['error']}")
-        return res
-    else:
-        print(res["res"])
-    
-
-    # Store chunks in PostgreSQL
-    res = storing_chunks(chunks)
-    if "error" in res:
-        print(f"Errors storing chunks: {res['error']}")
-        return res
-    else:
-        print(res["res"])
-
-    return {
-        "res": "Ingestion pipeline completed successfully!"
-    }
-
-
 if __name__ == "__main__":
-    main()
+    upload_documents()

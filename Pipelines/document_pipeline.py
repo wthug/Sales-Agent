@@ -169,7 +169,7 @@ def get_all_items(drive_id, folder="root", path=""):
                     download_file(drive_id, item["id"], item["name"])
                     
                 # if item["name"].lower().endswith(".docx"):
-                #     download_file(drive_id, item["id"], item["name"],docs)
+                #     download_file(drive_id, item["id"], item["name"])
 
 
         url = data.get("@odata.nextLink")

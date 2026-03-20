@@ -1,7 +1,10 @@
 from flask import Flask, request, jsonify
 from Agent.rag_agent import create_chat_agent
-from Pipelines.document_pipeline import download_documents
-from Pipelines.ingestion_pipeline import upload_documents
+# from Pipelines.document_pipeline import download_documents
+# from Pipelines.ingestion_pipeline import upload_documents
+from langchain_core.documents import Document
+from typing import List
+
 
 app = Flask(__name__)
 
@@ -28,9 +31,31 @@ def chat_endpoint():
         })
 
         final_text = response["messages"][-1].content
-        return final_text
+        result = {
+            "output" : final_text,
+            "documents_name" : set()
+        }
+
+        docs: List[Document] = []
+
+        for msg in reversed(response["messages"]):
+            if msg.type == "tool" and hasattr(msg, "artifact"):
+                docs = (msg.artifact)
+                break
+            
+        for doc in docs:
+            id, doc_text , doc_name, score  = doc
+            result["documents_name"].add(doc_name) 
+        # if len(docs)>0:
+            # id,doc_text,doc_name,doc_sharepoint_url,score = docs[0]
+            # id,doc_text,doc_name,score = docs[0]
+            # result["document_sharepoint_url"] = doc_sharepoint_url 
+        result["documents_name"]=list(result["documents_name"])
+        print(result)
+        return result
 
     except Exception as e:
+        # print("here")
         return jsonify({
             "error": str(e)
         }), 500
@@ -40,27 +65,27 @@ import schedule
 import time
 import threading
 
-def run_task():
-    print("\n\nRunning at midnight....\n")
-    download_documents()
-    upload_documents()
-    print("\n\n...Task completed...\n")
+# def run_task():
+#     print("\n\nRunning at midnight....\n")
+#     download_documents()
+#     upload_documents()
+#     print("\n\n...Task completed...\n")
 
-def scheduler_loop():
-    schedule.every().day.at("16:31").do(run_task)
+# def scheduler_loop():
+#     schedule.every().day.at("17:46").do(run_task)
 
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
-
-# if __name__ == "__main__":
-#     # Start scheduler in background thread
-#     t = threading.Thread(target=scheduler_loop, daemon=True)
-#     t.start()
-
-#     # Start Flask app
-#     app.run(host="0.0.0.0", port=8000, debug=True)
+#     while True:
+#         schedule.run_pending()
+#         time.sleep(60)
 
 if __name__ == "__main__":
-    run_task()
+    # Start scheduler in background thread
+    # t = threading.Thread(target=scheduler_loop, daemon=True)
+    # t.start()
+
+    # Start Flask app
+    app.run(host="0.0.0.0", port=8000, debug=False, use_reloader=False)
+
+# if __name__ == "__main__":
+#     run_task()
 

@@ -58,8 +58,14 @@ def search_similar_chunk(user_input :str, top_k=5) -> list:
 
         try:
             # Search Query
+            # search_query = """
+            #     SELECT document_id , chunk_text ,document_name, document_sharepoint_url ,1 - (embedding <=> %s::vector ) AS similarity
+            #     FROM all_document_chunks
+            #     ORDER BY embedding <=> %s::vector
+            #     LIMIT %s;
+            # """
             search_query = """
-                SELECT document_id , chunk_text ,document_name, document_sharepoint_url ,1 - (embedding <=> %s::vector ) AS similarity
+                SELECT document_id , chunk_text ,document_name, 1 - (embedding <=> %s::vector ) AS similarity
                 FROM all_document_chunks
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s;
