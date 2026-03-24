@@ -13,10 +13,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-
 def main():
     st.set_page_config(page_title="Sales Agent Portal", layout="wide")
-
     st.sidebar.title("Navigation")
     menu = st.sidebar.radio(
         "Go to:",
@@ -29,7 +27,6 @@ def main():
     if menu == "📄 Upload Documents":
         st.title("📄 Document Upload")
         st.write("Upload files to build your Sales Agent knowledge base.")
-
         st.subheader("Upload Documents to Store (PDF / Docx)")
         user_input = st.file_uploader(
             "Upload a document to store in the knowledge base:",
@@ -103,23 +100,18 @@ def main():
                         with st.expander("📄 View Sources"):
                             for src in msg["sources"]:
                                 st.markdown(f"- {src}")
-
                             
         with st.form(key="chat_form", clear_on_submit=True):
             user_input = st.text_input("💬 Type your message:")
             submitted = st.form_submit_button("Send")
-
-
         if submitted and user_input.strip():
             st.session_state["messages"].append({
                 "role": "user", 
                 "content": user_input.strip()
             })
-
             payload = {
                 "messages": st.session_state["messages"].copy()
             }
-
             with chat_box:
                 st.markdown(
                     f"""
@@ -128,22 +120,16 @@ def main():
                     """,
                     unsafe_allow_html=True,
                 )
-
             # Run agent
+            sources = []
             with st.spinner("Thinking..."):
                 try:
                     response = requests.post(url, json=payload)
-
                     if response.status_code == 200:
                         data = response.json()
-                        
-                        ai_reply = f"{data["output"]}\n\n"
-                        sources = []
-                        if "documents_name" in data and len(data["documents_name"])>0:
-                            sources = data["documents_name"]
-
-                        print(sources)
-
+                        ai_reply = f"{data.get('content', '')}\n\n"
+                        if "artifact" in data and len(data["artifact"]) > 0:
+                            sources = [doc.get("document_name", "") for doc in data["artifact"]]
                         # if document_url:
                         #     ai_reply += f"\n🔗 Link: {document_url}"
 

@@ -1,11 +1,9 @@
-
 import os
 from dotenv import load_dotenv
 
 from langchain_openai import OpenAIEmbeddings
 
 import psycopg2
-
 
 load_dotenv()
 
@@ -20,8 +18,7 @@ port = os.getenv("port")
 
 # To generate embeddings
 
-def get_embeddings(input_text: str) -> list:
-    
+def get_embeddings(input_text: str) -> list:    
     try:
         embeddings = OpenAIEmbeddings(
             api_key=open_api_key,
@@ -32,8 +29,7 @@ def get_embeddings(input_text: str) -> list:
         return embedding_vector
     except Exception as e:
         print(f"Error generating embeddings: {e}")
-        return []
-   
+        return []   
 
 def search_similar_chunk(user_input :str, top_k=5) -> list:
     """Return the most similar chunks to the user input based on cosine similarity."""
@@ -70,16 +66,32 @@ def search_similar_chunk(user_input :str, top_k=5) -> list:
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s;
             """
-            
             cur.execute(search_query, (embedding_vector , embedding_vector , top_k))
             results = cur.fetchall()
-
             cur.close()
             conn.close()
-            
-            return {
-                "output": results
-            }
+            formatted_content = ""
+            documents = []
+            for row in results:
+                document_id, chunk_text, document_name, similarity = row
+                formatted_content += f"""
+                Document: {document_name}
+                Similarity Score: {similarity:.2f}
+                Chunk:
+                {chunk_text}
+                ----------------------
+                """
+                documents.append({
+                    "document_id": document_id,
+                    "document_name": document_name,
+                    "similarity": similarity
+                })
+                formatted_content.strip(),   
+                documents                  
+            return (formatted_content.strip(),documents)
+            # return {
+            #     "output": results
+            # }
         
         except Exception as e:
             return {

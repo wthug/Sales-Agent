@@ -1,29 +1,22 @@
-
 import requests
 import os
 import psycopg2
-
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
-
 tenant_id = os.getenv("tenant_id")
 client_id = os.getenv("client_id")
 client_secret = os.getenv("client_secret")
 SHAREPOINT_DOMAIN = os.getenv("SHAREPOINT_DOMAIN")
-
 token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-
 token_data = {
     "grant_type": "client_credentials",
     "client_id": client_id,
     "client_secret": client_secret,
     "scope": "https://graph.microsoft.com/.default"
 }
-
 response = requests.post(token_url, data=token_data)
 access_token = response.json().get("access_token")
-
 if access_token:
     print("✅ Token generated")
 else:
@@ -35,7 +28,7 @@ headers = {
 }   
 
 # =========================
-# 🌐 STEP 1: GET SITE
+# STEP 1: GET SITE
 # =========================
 site_url = "https://graph.microsoft.com/v1.0/sites/sutramanagement.sharepoint.com:/sites/SutraProposalsRepository"
 
@@ -74,7 +67,6 @@ DOWNLOAD_FOLDER = "downloaded_documents"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
 
-
 # Database connection configuration
 db_name = os.getenv("db_name")
 user = os.getenv("user")
@@ -97,20 +89,17 @@ except Exception as e:
 
 
 # Database update function 
-
-def update_db(file_name, sharepoint_url = "youtube.com"):
-
+def update_db(file_name, sharepoint_url):
     try:
         cur = conn.cursor()
         update_query = """
-            INSERT INTO documents (file_name , sharepoint_url) 
+            INSERT INTO temp_documents (file_name , sharepoint_url) 
             VALUES (%s, %s)
         """
         cur.execute(
             update_query ,
             (file_name, sharepoint_url)
         )
-
         conn.commit()
         cur.close() 
         print(f"Database updated with {file_name}")
@@ -118,10 +107,8 @@ def update_db(file_name, sharepoint_url = "youtube.com"):
         cur.close()
         print(f"❌ Error updating database with {file_name}: {e}") 
 
-
 # Download file from SharePoint
-
-def download_file(drive_id, item_id, file_name ):
+def download_file(drive_id, item_id, file_name, web_url ):
     download_url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/content"
     res = requests.get(download_url, headers=headers, stream=True)
     print(download_url)
@@ -131,22 +118,14 @@ def download_file(drive_id, item_id, file_name ):
             for chunk in res.iter_content(chunk_size=8192):
                 f.write(chunk)
         print(f"⬇️ Downloaded: {file_name}")
-
         # Updating database with file name and sharepoint url
-        update_db(file_name)
-
-        
-
+        update_db(file_name,web_url)
     else:
-        print(f"❌ Failed to download {file_name}: {res.text}")
-        
-
+        print(f"❌ Failed to download {file_name}: {res.text}")      
 
 
 # Recursively get all items in the document library
-
 def get_all_items(drive_id, folder="root", path=""):
-    
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/{folder}/children"
     while url:
         res = requests.get(url, headers=headers)
@@ -158,22 +137,16 @@ def get_all_items(drive_id, folder="root", path=""):
                 get_all_items(drive_id,  f"items/{item['id']}", current_path)
             else:
                 print(f"📄 {current_path}")
-
                 # Cross check if file already exists to avoid duplicates
                 if os.path.exists(os.path.join(DOWNLOAD_FOLDER, item["name"])):
                     print(f"⚠️ Skipping {item['name']} (already exists)")
                     continue                
-
                 # ✅ DOWNLOAD ONLY PDF AND DOCX FILES
                 if item["name"].lower().endswith(".pdf"):
-                    download_file(drive_id, item["id"], item["name"])
-                    
+                    download_file(drive_id, item["id"], item["name"],item.get("webUrl", ""))
                 # if item["name"].lower().endswith(".docx"):
                 #     download_file(drive_id, item["id"], item["name"])
-
-
         url = data.get("@odata.nextLink")
-    
 
 def download_documents():
     print("Starting SharePoint document download...")

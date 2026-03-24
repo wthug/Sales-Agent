@@ -32,7 +32,7 @@ def get_embeddings(input_text: str) -> list:
         return []
 
 
-def search_similar_summary( input_text: str, top_k=1) -> list:
+def search_similar_summary( input_text: str, top_k=4) -> list:
     """Return the most similar summary to the input text based on cosine similarity."""
     try:
         # Connection Configuration
@@ -73,9 +73,26 @@ def search_similar_summary( input_text: str, top_k=1) -> list:
 
             cur.close()
             conn.close()
-            return {
-                "output": results
-            }
+            formatted_content = ""
+            documents = []
+            for row in results:
+                document_id, summary_text, document_name, similarity = row
+                formatted_content += f"""
+                Document: {document_name}
+                Similarity Score: {similarity:.2f}
+                Summary:
+                {summary_text}
+                ----------------------
+                """
+                documents.append({
+                    "document_id": document_id,
+                    "document_name": document_name,
+                    "similarity": similarity
+                })
+
+                formatted_content.strip(),   
+                documents                  
+            return (formatted_content.strip(),documents)
         
         except Exception as e:
             cur.close()
@@ -92,7 +109,6 @@ def search_similar_summary( input_text: str, top_k=1) -> list:
 
 def main():
     user_input = input("Enter your query: ")
-
     # Generating embeddings for the user input
     embedding_vector = get_embeddings(user_input)
     if embedding_vector:
@@ -100,8 +116,6 @@ def main():
     else:   
         print("Failed to generate embedding vector.")
         return
-    
-
     result = search_similar_docs(embedding_vector,top_k=1)
     if result:
         print("Similar document found:")
