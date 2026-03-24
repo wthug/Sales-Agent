@@ -94,15 +94,17 @@ def chat_endpoint():
                     result["artifact"].append({
                         "document_id": doc.get("document_id"),
                         "document_name": doc.get("document_name"),
-                        "similarity": doc.get("similarity")
+                        "similarity": doc.get("similarity"),
+                        "document_sharepoint_url":doc.get("document_sharepoint_url")
                     })
                 # 🔹 OLD FORMAT (tuple)
-                elif isinstance(doc, (list, tuple)) and len(doc) >= 4:
-                    doc_id, doc_text, doc_name, score = doc
+                elif isinstance(doc, (list, tuple)) and len(doc) >= 5:
+                    doc_id, doc_text, doc_name, score,document_sharepoint_url = doc
                     result["artifact"].append({
                         "document_id": doc_id,
                         "document_name": doc_name,
-                        "similarity": score
+                        "similarity": score,
+                        "document_sharepoint_url": document_sharepoint_url
                     })
             except Exception as e:
                 print("Error processing doc:", e)

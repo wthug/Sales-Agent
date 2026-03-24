@@ -59,13 +59,14 @@ def search_summary_tool(query: str):
         try:
             if isinstance(doc, dict):
                 document_name = doc.get("document_name", "Unknown")
-                similarity = doc.get("similarity", 0)
-            elif isinstance(doc, (list, tuple)) and len(doc) >= 4:
-                _, _, document_name, similarity = doc
+                similarity = doc.get("similarity", 0),
+                document_sharepoint_url=doc.get("document_sharepoint_url","")
+            elif isinstance(doc, (list, tuple)) and len(doc) >= 5:
+                _, _, document_name, similarity,document_sharepoint_url = doc
             else:
                 continue
             source_info_list.append(
-                f"[Source {i+1}: {document_name} | relevance: {similarity:.2f}]"
+                f"[Source {i+1}: {document_name}]"
             )
         except Exception as e:
             print("Error formatting doc:", e)
@@ -91,12 +92,13 @@ def search_chunk_tool(query:str) -> Tuple[str,List[Document]]:
             if isinstance(doc, dict):
                 document_name = doc.get("document_name", "Unknown")
                 similarity = doc.get("similarity", 0)
-            elif isinstance(doc, (list, tuple)) and len(doc) >= 4:
-                _, _, document_name, similarity = doc
+                document_sharepoint_url=doc.get("document_sharepoint_url","")
+            elif isinstance(doc, (list, tuple)) and len(doc) >= 5:
+                _, _, document_name, similarity,document_sharepoint_url = doc
             else:
                 continue
             source_info_list.append(
-                f"[Source {i+1}: {document_name} | relevance: {similarity:.2f}]"
+                f"[Source {i+1}: {document_name}]"
             )
         except Exception as e:
             print("Error formatting doc:", e)
@@ -117,7 +119,7 @@ def create_chat_agent():
     llm = ChatOpenAI(
         model="gpt-5-mini",
         api_key=open_api_key,
-        temperature=0.7
+        temperature=0.0
     )
 
     # llm = llm.with_structured_output(AgentResponse)

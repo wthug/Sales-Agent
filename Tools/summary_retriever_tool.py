@@ -62,7 +62,7 @@ def search_similar_summary( input_text: str, top_k=4) -> list:
             #     LIMIT %s;
             # """
             search_query = """
-                SELECT document_id , summary_text , document_name , 1 - (summary_embedding <=> %s::vector ) AS similarity
+                SELECT document_id , summary_text , document_name , 1 - (summary_embedding <=> %s::vector ) AS similarity,document_sharepoint_url
                 FROM all_document_summaries
                 ORDER BY summary_embedding <=> %s::vector
                 LIMIT %s;
@@ -76,7 +76,7 @@ def search_similar_summary( input_text: str, top_k=4) -> list:
             formatted_content = ""
             documents = []
             for row in results:
-                document_id, summary_text, document_name, similarity = row
+                document_id, summary_text, document_name, similarity,document_sharepoint_url = row
                 formatted_content += f"""
                 Document: {document_name}
                 Similarity Score: {similarity:.2f}
@@ -87,7 +87,8 @@ def search_similar_summary( input_text: str, top_k=4) -> list:
                 documents.append({
                     "document_id": document_id,
                     "document_name": document_name,
-                    "similarity": similarity
+                    "similarity": similarity,
+                    "document_sharepoint_url":document_sharepoint_url
                 })
 
                 formatted_content.strip(),   
