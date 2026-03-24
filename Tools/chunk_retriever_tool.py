@@ -64,7 +64,7 @@ def search_similar_chunk(user_input :str, top_k=5) -> list:
             #     LIMIT %s;
             # """
             search_query = """
-                SELECT document_id , chunk_text ,document_name, 1 - (embedding <=> %s::vector ) AS similarity
+                SELECT document_id , chunk_text ,document_name, 1 - (embedding <=> %s::vector ) AS similarity, document_sharepoint_url
                 FROM all_document_chunks
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s;
@@ -76,7 +76,7 @@ def search_similar_chunk(user_input :str, top_k=5) -> list:
             formatted_content = ""
             documents = []
             for row in results:
-                document_id, chunk_text, document_name, similarity = row
+                document_id, chunk_text, document_name, similarity,document_sharepoint_url = row
                 formatted_content += f"""
                 Document: {document_name}
                 Similarity Score: {similarity:.2f}
@@ -87,7 +87,8 @@ def search_similar_chunk(user_input :str, top_k=5) -> list:
                 documents.append({
                     "document_id": document_id,
                     "document_name": document_name,
-                    "similarity": similarity
+                    "similarity": similarity,
+                    "document_sharepoint_url":document_sharepoint_url
                 })
                 formatted_content.strip(),   
                 documents                  
