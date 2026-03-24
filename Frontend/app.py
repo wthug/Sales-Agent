@@ -130,11 +130,12 @@ def main():
                         ai_reply = f"{data.get('content', '')}\n\n"
                         if "artifact" in data and len(data["artifact"]) > 0:
                             sources = [
-                                        f"{doc.get('document_name', '')} → {doc.get('document_sharepoint_url', '')}"
-                                        if doc.get("document_sharepoint_url")
-                                        else doc.get("document_name", "")
-                                        for doc in data["artifact"]
-                                    ]
+                                f"{doc.get('document_name', 'Unknown')} ([Link]({doc['document_sharepoint_url']}))" 
+                                if doc.get("document_sharepoint_url") 
+                                else doc.get("document_name", "Unknown")
+                                for doc in data.get("artifact", [])
+                            ]
+                            
                         # if document_url:
                         #     ai_reply += f"\n🔗 Link: {document_url}"
 

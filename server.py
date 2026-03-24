@@ -87,10 +87,17 @@ def chat_endpoint():
                 docs = msg.artifact
                 break
         # ✅ Handle BOTH formats (old tuple + new dict)
+        my_set = set()
         for doc in docs:
             try:
                 # 🔹 NEW FORMAT (dict)
                 if isinstance(doc, dict):
+                    doc_name = doc.get("document_name")
+
+                    if doc_name in my_set:
+                        continue
+                    my_set.add(doc_name)
+
                     result["artifact"].append({
                         "document_id": doc.get("document_id"),
                         "document_name": doc.get("document_name"),
@@ -100,6 +107,13 @@ def chat_endpoint():
                 # 🔹 OLD FORMAT (tuple)
                 elif isinstance(doc, (list, tuple)) and len(doc) >= 5:
                     doc_id, doc_text, doc_name, score,document_sharepoint_url = doc
+
+                    if doc_name in my_set:
+                        continue
+                    
+                    my_set.add(doc_name)
+                    
+
                     result["artifact"].append({
                         "document_id": doc_id,
                         "document_name": doc_name,
@@ -108,6 +122,7 @@ def chat_endpoint():
                     })
             except Exception as e:
                 print("Error processing doc:", e)
+        
         print("FINAL RESPONSE:", result)
         return jsonify(result)
 
