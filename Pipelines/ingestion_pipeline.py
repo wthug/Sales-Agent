@@ -2,6 +2,7 @@ from langchain_community.document_loaders import DirectoryLoader, TextLoader ,Py
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAI, OpenAIEmbeddings
 from langchain_core.prompts import PromptTemplate
+from langsmith import traceable
 
 from pgvector.psycopg2 import register_vector
 import psycopg2
@@ -28,7 +29,7 @@ conn = psycopg2.connect(
     port=port
 )
 
-
+@traceable(run_type="chain", name="Document_Summarizer")
 def generate_summary(input_text: str) -> str:
     try:
         llm = OpenAI(
@@ -173,10 +174,10 @@ def upload_documents():
         document_id , doc, sharepoint_url , indexed = doc_tuple
         if doc.endswith('.pdf'):
             loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=PyPDFLoader)
-        #elif doc.endswith('.txt'):
-            #loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=TextLoader)
-        #elif doc.endswith('.docx'):
-            #loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=Docx2txtLoader)
+        elif doc.endswith('.txt'):
+            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=TextLoader)
+        elif doc.endswith('.docx'):
+            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=Docx2txtLoader)
         else:
             print(f"Unsupported file type for {doc}. Skipping.")
             continue
