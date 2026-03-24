@@ -91,6 +91,24 @@ def create_tables():
         """)
         print("✓ all_document_chunks table created")
         
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS summary_cost(
+                id SERIAL PRIMARY KEY ,
+                document_id UUID REFERENCES documents(document_id),
+                document_name TEXT NOT NULL,
+                document_sharepoint_url TEXT,
+                model_name TEXT,
+                input_tokens INT,
+                output_tokens INT,
+                token_count INT,
+                timestemp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_amount FLOAT8
+            );
+        """)
+        print("✓ summary_cost created")
+
+
         conn.commit()
         print("\n✓ All tables created successfully!")
         
