@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 
 from langchain_openai import OpenAIEmbeddings
+from langsmith import traceable
 
 import psycopg2
 
@@ -31,6 +32,8 @@ def get_embeddings(input_text: str) -> list:
         print(f"Error generating embeddings: {e}")
         return []   
 
+
+@traceable(run_type="retriever", name="Vector_DB_Search")
 def search_similar_chunk(user_input :str, top_k=5) -> list:
     """Return the most similar chunks to the user input based on cosine similarity."""
     try:
