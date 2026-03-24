@@ -4,7 +4,7 @@ from Agent.rag_agent import create_chat_agent
 # from Pipelines.ingestion_pipeline import upload_documents
 from langchain_core.documents import Document
 from typing import List
-
+import traceback
 
 app = Flask(__name__)
 
@@ -12,55 +12,109 @@ app = Flask(__name__)
 agent = create_chat_agent()
 
 
+# @app.route("/api/chat", methods=["POST"])
+# def chat_endpoint():
+
+#     data = request.get_json(silent=True)
+
+#     if not data:
+#         return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+#     messages = data.get("messages")
+
+#     if not messages or not isinstance(messages, list):
+#         return jsonify({"error": "messages must be a list"}), 400
+
+#     try:
+#         response = agent.invoke({
+#             "messages": messages
+#         })
+#         print(response)
+#         final_text = response["messages"][-1].content
+#         result = {
+#             "output" : final_text,
+#             "documents_name" : set()
+#         }
+#         docs: List[Document] = []
+#         for msg in reversed(response["messages"]):
+#             if msg.type == "tool" and hasattr(msg, "artifact"):
+#                 docs = (msg.artifact)
+#                 break
+            
+#         for doc in docs:
+#             id, doc_text , doc_name, score  = doc
+#             result["documents_name"].add(doc_name) 
+#         # if len(docs)>0:
+#             # id,doc_text,doc_name,doc_sharepoint_url,score = docs[0]
+#             # id,doc_text,doc_name,score = docs[0]
+#             # result["document_sharepoint_url"] = doc_sharepoint_url 
+#         result["documents_name"]=list(result["documents_name"])
+#         print(result)
+#         return result
+
+#     except Exception as e:
+#         # print("here")
+#         return jsonify({
+#             "error": str(e)
+#         }), 500
+
+
 @app.route("/api/chat", methods=["POST"])
 def chat_endpoint():
-
     data = request.get_json(silent=True)
-
     if not data:
         return jsonify({"error": "Invalid or missing JSON body"}), 400
-
     messages = data.get("messages")
-
+    print(messages)
     if not messages or not isinstance(messages, list):
         return jsonify({"error": "messages must be a list"}), 400
-
     try:
         response = agent.invoke({
             "messages": messages
         })
-
+        print(response)
+        # ✅ Final LLM response
         final_text = response["messages"][-1].content
+        # ✅ Initialize result in NEW FORMAT
         result = {
-            "output" : final_text,
-            "documents_name" : set()
+            "content": final_text,
+            "artifact": []
         }
-
-        docs: List[Document] = []
-
+        docs = []
+        # 🔍 Extract tool artifact (latest tool call)
         for msg in reversed(response["messages"]):
-            if msg.type == "tool" and hasattr(msg, "artifact"):
-                docs = (msg.artifact)
+            if msg.type == "tool" and hasattr(msg, "artifact") and msg.artifact:
+                docs = msg.artifact
                 break
-            
+        # ✅ Handle BOTH formats (old tuple + new dict)
         for doc in docs:
-            id, doc_text , doc_name, score  = doc
-            result["documents_name"].add(doc_name) 
-        # if len(docs)>0:
-            # id,doc_text,doc_name,doc_sharepoint_url,score = docs[0]
-            # id,doc_text,doc_name,score = docs[0]
-            # result["document_sharepoint_url"] = doc_sharepoint_url 
-        result["documents_name"]=list(result["documents_name"])
-        print(result)
-        return result
+            try:
+                # 🔹 NEW FORMAT (dict)
+                if isinstance(doc, dict):
+                    result["artifact"].append({
+                        "document_id": doc.get("document_id"),
+                        "document_name": doc.get("document_name"),
+                        "similarity": doc.get("similarity")
+                    })
+                # 🔹 OLD FORMAT (tuple)
+                elif isinstance(doc, (list, tuple)) and len(doc) >= 4:
+                    doc_id, doc_text, doc_name, score = doc
+                    result["artifact"].append({
+                        "document_id": doc_id,
+                        "document_name": doc_name,
+                        "similarity": score
+                    })
+            except Exception as e:
+                print("Error processing doc:", e)
+        print("FINAL RESPONSE:", result)
+        return jsonify(result)
 
     except Exception as e:
-        # print("here")
+        traceback.print_exc()
         return jsonify({
             "error": str(e)
         }), 500
-
-
+    
 import schedule
 import time
 import threading

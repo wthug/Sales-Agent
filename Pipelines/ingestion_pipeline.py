@@ -59,6 +59,7 @@ def generate_summary(input_text: str) -> str:
         )
         chain = prompt | llm
         summary = chain.invoke({"text": input_text})
+        print(summary)
         return summary
     except Exception as e: 
         return ""
@@ -80,17 +81,12 @@ def get_embeddings(input_text: str) -> list:
 
 
 def storing_summary(summary: str , document_id , doc: str, sharepoint_url: str) -> dict:
-    
     try:
-
         summary_embeddings = get_embeddings(summary)
         if not summary_embeddings:
             return {
                 "error": "Failed to generate embeddings for summary."
             }
-
-        
-
         # Store Summary in PostgreSQL
         try:
             cur = conn.cursor()
@@ -112,29 +108,26 @@ def storing_summary(summary: str , document_id , doc: str, sharepoint_url: str) 
             return {
                 "error" :{e}
             } 
-        
     except Exception as e:
         return {
             "error" :{e}
         }
 
-
-
 # Storing chunks in PostgreSQL
-
 def storing_chunks(chunks: list , document_id , doc: str, sharepoint_url: str) -> dict:
     try:
-
         cur = conn.cursor()
         errors = []
+        print(len(chunks))
+        number=0
         for index, chunk in enumerate(chunks):
             try:
+                number+=1
+                print(f"Chunk No:{number}")
                 chunk_embeddings = get_embeddings(chunk.page_content)
-
                 if not chunk_embeddings:
                     errors.append({"error" : f"Failed to generate embeddings for chunk {index + 1}."})
                     continue
-                        
                 store_query = """
                     INSERT INTO all_document_chunks ( document_id, chunk_index , chunk_text , embedding , document_name , document_sharepoint_url )  
                     VALUES ( %s, %s , %s, %s , %s , %s )
@@ -146,13 +139,11 @@ def storing_chunks(chunks: list , document_id , doc: str, sharepoint_url: str) -
                 conn.commit()
             except Exception as e:
                 errors.append({"error" : f"Error storing chunk {index + 1} -> {e}"})
-        
         cur.close()
         return {
             "res": "Chunks stored successfully!",
             "errors": errors
         }
-
     except Exception as e:
         return{
             "error" :{e}
@@ -161,7 +152,6 @@ def storing_chunks(chunks: list , document_id , doc: str, sharepoint_url: str) -
 
 
 def upload_documents():
-    
     docs = []
     try:
         cur = conn.cursor()
@@ -178,40 +168,28 @@ def upload_documents():
         print("Error Fetching index pending documents : {e} ")
         return
 
-
     print(f"\n\nUploading {len(docs)} documents in VectorDB....\n")
-
     for doc_tuple in docs:
-
         document_id , doc, sharepoint_url , indexed = doc_tuple
-        
-
         if doc.endswith('.pdf'):
             loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=PyPDFLoader)
-        elif doc.endswith('.txt'):
-            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=TextLoader)
-        elif doc.endswith('.docx'):
-            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=Docx2txtLoader)
+        #elif doc.endswith('.txt'):
+            #loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=TextLoader)
+        #elif doc.endswith('.docx'):
+            #loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=Docx2txtLoader)
         else:
             print(f"Unsupported file type for {doc}. Skipping.")
             continue
-
         
-
         loaded_doc = loader.load()  
-
         print(f"✅ Loaded {doc} from directory.")
-    
         # Extract and chunk text
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=800,
             chunk_overlap=100
         )
-
         chunks = text_splitter.split_documents(loaded_doc)
-
         page_content = " ".join([doc.page_content for doc in loaded_doc])
-
         # Generate Summary
         summary = generate_summary(page_content)
         if summary == "":
@@ -223,16 +201,13 @@ def upload_documents():
         if "error" in res:
             print(f"Error storing summary for {doc}: {res['error']}")
             continue
-        
-
+        print("Reached Chunking Phase")
         # Store chunks in PostgreSQL
         res = storing_chunks(chunks , document_id , doc ,sharepoint_url)
         if "error" in res:
             print(f"Errors storing chunks for {doc}: {res['error']}")
             continue
-
         print(f"Done indexing {doc}")
-
         try:
             cur = conn.cursor()
             update_query = """
@@ -246,11 +221,8 @@ def upload_documents():
         except Exception as e:
             cur.close()
             print(f"Error updating document status for {doc}: {e}")
-
     conn.close()
     print("\nAll documents uploaded successfully!\n\n")
-    
-
 
 if __name__ == "__main__":
     upload_documents()
