@@ -43,10 +43,14 @@ from typing import List, Tuple
 #     formatted_context = "\n\n---\n\n".join(formatted_parts)
 #     return formatted_context, docs
 
+
+from langsmith import traceable
+
 @tool(
     response_format="content_and_artifact",
     description="Retrieve relevant document summaries for a user query."
 )
+@traceable(run_type="tool", name="Search_Summary")
 def search_summary_tool(query: str):
     content, docs = search_similar_summary(query)
     print("------ Retrieved Summary (CONTENT) ------")
@@ -78,6 +82,7 @@ def search_summary_tool(query: str):
     response_format="content_and_artifact",
     description="Use this tool to retrieve the most relevant document chunks for a user query. Returns formatted source information for display and raw chunk data for further processing"
 )
+@traceable(run_type="tool", name="Search_Chunk")
 def search_chunk_tool(query:str) -> Tuple[str,List[Document]]:
     content, docs = search_similar_chunk(query)
     print("------ Retrieved Summary (CONTENT) ------")

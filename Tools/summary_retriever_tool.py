@@ -3,6 +3,7 @@ import os
 import psycopg2
 from langchain_openai import OpenAIEmbeddings
 from dotenv import load_dotenv
+from langsmith import traceable
 
 load_dotenv()
 
@@ -32,6 +33,7 @@ def get_embeddings(input_text: str) -> list:
         return []
 
 
+@traceable(run_type="retriever", name="Vector_DB_Search")
 def search_similar_summary( input_text: str, top_k=4) -> list:
     """Return the most similar summary to the input text based on cosine similarity."""
     try:
