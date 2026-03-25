@@ -9,6 +9,7 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const navigate = useNavigate();
   const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
   const [isLoading, setIsLoading] = useState(false);
 
@@ -27,8 +28,29 @@ export default function Chat() {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    if (input === '' && textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  }, [input]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend(e);
+    }
+  };
+
+  const handleChange = (e) => {
+    setInput(e.target.value);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  };
+
   const handleSend = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     if (!input.trim() || isLoading) return;
 
     const token = localStorage.getItem('token');
@@ -128,8 +150,7 @@ export default function Chat() {
               {localStorage.getItem('username')?.substring(0, 2) || 'U'}
             </div>
             <div className="flex-1 overflow-hidden">
-              <div className="truncate text-sm font-medium text-gray-900">{localStorage.getItem('username') || 'User'}</div>
-              <div className="truncate text-xs text-gray-500">Free Plan</div>
+              <div className="truncate text-sm font-medium text-gray-900">{localStorage.getItem('username') || 'User'}</div>  
             </div>
             <button onClick={() => {
               localStorage.removeItem('token');
@@ -198,12 +219,15 @@ export default function Chat() {
           <div className="mx-auto max-w-3xl">
             <form onSubmit={handleSend} className="relative flex items-end gap-2">
               <div className="relative flex-1">
-                <input
-                  type="text"
+                <textarea
+                  ref={textareaRef}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={handleChange}
+                  onKeyDown={handleKeyDown}
                   placeholder="Type a message..."
-                  className="w-full rounded-2xl border-gray-200 bg-gray-50 py-3.5 pl-5 pr-12 text-[15px] outline-none transition-all placeholder:text-gray-400 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                  rows={1}
+                  className="block w-full overflow-hidden resize-none rounded-2xl border-gray-200 bg-gray-50 py-3.5 pl-5 pr-12 text-[15px] leading-[24px] outline-none transition-all placeholder:text-gray-400 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                  style={{ minHeight: '52px', maxHeight: '200px' }}
                 />
               </div>
               <button
@@ -218,9 +242,7 @@ export default function Chat() {
                 )}
               </button>
             </form>
-            <div className="mt-2 text-center text-xs text-gray-400">
-              AI can make mistakes. Consider verifying important information.
-            </div>
+            
           </div>
         </div>
       </div>
