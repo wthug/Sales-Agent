@@ -1,3 +1,11 @@
 .env
 Documents
-/Pipelines/downloaded_documents
+/Pipelines/downloaded_documents/
+/frontend-react/node_modules/
+
+# node_modules/
+__pycache__/
+dist/
+build/
+.DS_Store
+*.log

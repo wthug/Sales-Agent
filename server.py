@@ -1,65 +1,122 @@
+import os
+import jwt
+import datetime
+import psycopg2
+import psycopg2.extras
+from functools import wraps
 from flask import Flask, request, jsonify
+from werkzeug.security import generate_password_hash, check_password_hash
+from sql_script import Database
+
 from Agent.rag_agent import create_chat_agent
-# from Pipelines.document_pipeline import download_documents
-# from Pipelines.ingestion_pipeline import upload_documents
 from langchain_core.documents import Document
 from typing import List
 import traceback
 
 app = Flask(__name__)
 
+# Initialize database schema
+Database.init_db()
+
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super-secret-fallback-key")
+
+def require_token(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # We also need to support CORS preflight options so OPTIONS passes through if needed
+        if request.method == "OPTIONS":
+            return f(*args, **kwargs)
+            
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing or invalid token"}), 401
+        
+        token = auth_header.split(" ")[1]
+        try:
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
+            request.user_id = payload["user_id"]
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token expired"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid token"}), 401
+            
+        return f(*args, **kwargs)
+    return decorated
+
+@app.route("/api/register", methods=["POST"])
+def register():
+    data = request.get_json(silent=True)
+    if not data or not data.get("username") or not data.get("email") or not data.get("password"):
+        return jsonify({"error": "All fields (username, email, password) are required"}), 400
+        
+    username = data.get("username")
+    email = data.get("email")
+    password = data.get("password")
+    
+    hashed_password = generate_password_hash(password)
+    
+    conn = Database.get_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+        
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO users ( username, email, password_hash) VALUES (%s, %s, %s) RETURNING id",
+                (username, email, hashed_password)
+            )
+            new_user_id = cur.fetchone()[0]
+        conn.commit()
+        return jsonify({"message": "User created successfully", "user_id": new_user_id}), 201
+    except psycopg2.IntegrityError:
+        conn.rollback()
+        return jsonify({"error": "Username already exists"}), 409
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        Database.put_connection(conn)
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    data = request.get_json(silent=True)
+    if not data or not data.get("username") or not data.get("password"):
+        return jsonify({"error": "Username and password required"}), 400
+        
+    username = data["username"]
+    password = data["password"]
+    
+    conn = Database.get_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
+        
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT id, username, password_hash FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+            
+        if user and check_password_hash(user["password_hash"], password):
+            token = jwt.encode({
+                "user_id": user["id"],
+                "exp": datetime.datetime.utcnow() + datetime.timedelta(days=1)
+            }, JWT_SECRET_KEY, algorithm="HS256")
+            return jsonify({
+                "token": token, 
+                "username": user["username"],
+                "message": "Login successful"
+            }), 200
+        else:
+            return jsonify({"error": "Invalid credentials"}), 401
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        Database.put_connection(conn)
+
 # Create agent once at startup
 agent = create_chat_agent()
 
-
-# @app.route("/api/chat", methods=["POST"])
-# def chat_endpoint():
-
-#     data = request.get_json(silent=True)
-
-#     if not data:
-#         return jsonify({"error": "Invalid or missing JSON body"}), 400
-
-#     messages = data.get("messages")
-
-#     if not messages or not isinstance(messages, list):
-#         return jsonify({"error": "messages must be a list"}), 400
-
-#     try:
-#         response = agent.invoke({
-#             "messages": messages
-#         })
-#         print(response)
-#         final_text = response["messages"][-1].content
-#         result = {
-#             "output" : final_text,
-#             "documents_name" : set()
-#         }
-#         docs: List[Document] = []
-#         for msg in reversed(response["messages"]):
-#             if msg.type == "tool" and hasattr(msg, "artifact"):
-#                 docs = (msg.artifact)
-#                 break
-            
-#         for doc in docs:
-#             id, doc_text , doc_name, score  = doc
-#             result["documents_name"].add(doc_name) 
-#         # if len(docs)>0:
-#             # id,doc_text,doc_name,doc_sharepoint_url,score = docs[0]
-#             # id,doc_text,doc_name,score = docs[0]
-#             # result["document_sharepoint_url"] = doc_sharepoint_url 
-#         result["documents_name"]=list(result["documents_name"])
-#         print(result)
-#         return result
-
-#     except Exception as e:
-#         # print("here")
-#         return jsonify({
-#             "error": str(e)
-#         }), 500
-
-
-@app.route("/api/chat", methods=["POST"])
+@app.route("/api/chat", methods=["POST", "OPTIONS"])
+@require_token
 def chat_endpoint():
     data = request.get_json(silent=True)
     if not data:
@@ -130,33 +187,9 @@ def chat_endpoint():
         traceback.print_exc()
         return jsonify({
             "error": str(e)
-        }), 500
-    
-import schedule
-import time
-import threading
-
-# def run_task():
-#     print("\n\nRunning at midnight....\n")
-#     download_documents()
-#     upload_documents()
-#     print("\n\n...Task completed...\n")
-
-# def scheduler_loop():
-#     schedule.every().day.at("17:46").do(run_task)
-
-#     while True:
-#         schedule.run_pending()
-#         time.sleep(60)
+        }), 500    
 
 if __name__ == "__main__":
-    # Start scheduler in background thread
-    # t = threading.Thread(target=scheduler_loop, daemon=True)
-    # t.start()
-
-    # Start Flask app
+   
     app.run(host="0.0.0.0", port=8000, debug=False, use_reloader=False)
-
-# if __name__ == "__main__":
-#     run_task()
 
