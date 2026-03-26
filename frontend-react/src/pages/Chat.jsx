@@ -197,11 +197,11 @@ export default function Chat() {
         sources: sources
       };
       
-      let targetConvId = activeConvId;
       const originalDraftId = draftIdRef.current;
+      const targetConvId = activeConvId;
 
       const isStillViewingTarget = targetConvId 
-        ? (activeConversationRef.current === targetConvId)
+        ? (String(activeConversationRef.current) === String(targetConvId))
         : (activeConversationRef.current === null && draftIdRef.current === originalDraftId);
 
       if (isStillViewingTarget) {
@@ -212,7 +212,7 @@ export default function Chat() {
         fetchConversations(token);
       }
     } catch (err) {
-      const matchTarget = activeConvId ? (activeConversationRef.current === activeConvId) : (activeConversationRef.current === null && draftIdRef.current === draftIdRef.current);
+      const matchTarget = activeConvId ? (String(activeConversationRef.current) === String(activeConvId)) : (activeConversationRef.current === null && draftIdRef.current === originalDraftId);
       if (matchTarget) {
         const errorMsg = {
           id: Date.now() + 1,
@@ -223,10 +223,7 @@ export default function Chat() {
         setMessages(prev => [...prev, errorMsg]);
       }
     } finally {
-      const matchTarget = activeConvId ? (activeConversationRef.current === activeConvId) : (activeConversationRef.current === null && draftIdRef.current === draftIdRef.current);
-      if (matchTarget) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
   };
 

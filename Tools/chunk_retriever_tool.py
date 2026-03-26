@@ -34,7 +34,7 @@ def get_embeddings(input_text: str) -> list:
 
 
 @traceable(run_type="retriever", name="Vector_DB_Search")
-def search_similar_chunk(user_input :str, top_k=5) -> list:
+def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> list:
     """Return the most similar chunks to the user input based on cosine similarity."""
     try:
         # Connection Configuration
@@ -63,13 +63,23 @@ def search_similar_chunk(user_input :str, top_k=5) -> list:
             #     ORDER BY embedding <=> %s::vector
             #     LIMIT %s;
             # """
-            search_query = """
-                SELECT document_id , chunk_text ,document_name, 1 - (embedding <=> %s::vector ) AS similarity, document_sharepoint_url
-                FROM all_document_chunks
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s;
-            """
-            cur.execute(search_query, (embedding_vector , embedding_vector , top_k))
+            if doc_name:
+                search_query = """
+                    SELECT document_id, chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
+                    FROM all_document_chunks
+                    WHERE document_name = %s
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s;
+                """
+                cur.execute(search_query, (embedding_vector, doc_name, embedding_vector, top_k))
+            else:
+                search_query = """
+                    SELECT document_id, chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
+                    FROM all_document_chunks
+                    ORDER BY embedding <=> %s::vector
+                    LIMIT %s;
+                """
+                cur.execute(search_query, (embedding_vector, embedding_vector, top_k))
             results = cur.fetchall()
             cur.close()
             conn.close()

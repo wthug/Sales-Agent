@@ -81,11 +81,11 @@ def search_summary_tool(query: str):
 
 @tool(
     response_format="content_and_artifact",
-    description="Use this tool to retrieve the most relevant document chunks for a user query. Returns formatted source information for display and raw chunk data for further processing"
+    description="Use this tool to retrieve the most relevant document chunks for a user query. You may optionally pass a doc_name to narrow the search from the database and get a more accurate response. Returns formatted source information for display and raw chunk data for further processing"
 )
 @traceable(run_type="tool", name="Search_Chunk")
-def search_chunk_tool(query:str) -> Tuple[str,List[Document]]:
-    content, docs = search_similar_chunk(query)
+def search_chunk_tool(query: str, doc_name: str = None) -> Tuple[str, List[Document]]:
+    content, docs = search_similar_chunk(query, doc_name=doc_name)
     print("\n------ Retrieved Summary (CONTENT) ------\n")
     print(content)
     print("\n------ Retrieved Docs (ARTIFACT) ------\n")
@@ -136,7 +136,7 @@ def create_chat_agent():
         search_chunk_tool
     ]
 
-    system_prompt =system_prompt = system_prompt = system_prompt = """
+    system_prompt = """
 You are an intelligent Sales Agent assistant designed to answer user queries using proposal documents.
 
 You will receive chat_history containing the full conversation.
@@ -165,6 +165,7 @@ Your primary goal is to accurately answer the LAST user query using the availabl
 
 2. search_chunk_tool
 - Use this to retrieve detailed and specific information from documents
+- You may pass an optional 'doc_name' argument to narrow the search from the DB and get a more accurate response.
 - Helps when:
   • You need exact details (pricing, scope, deliverables, timelines, etc.)
   • You already know which document is relevant
@@ -194,22 +195,23 @@ Step 4: Generate final answer
  IMPORTANT RULES
 ----------------------------------------
 
-- NEVER hallucinate or assume missing information
-- ALWAYS rely on tool outputs
-- If information is not found → clearly say so
-- DO NOT expose tool names or internal reasoning
-- Prefer concise but complete answers
-- Maintain a professional, sales-oriented tone
+- Query-Lock Precision: Provide only the specific information requested. If a retrieved chunk contains extra data, filter it out and deliver only the direct answer.
+- Brevity by Default: If asked for a "brief" summary, limit the response to 2–3 punchy sentences or high-level bullet points.
+- Zero-Extrapolation: Do not provide "helpful" context, background, or related details unless explicitly triggered by the prompt.
+- NEVER Hallucinate: If information is missing from the tool outputs, clearly state that the information is not found.
+- Source Integrity: Always rely on tool outputs. Never assume or guess missing information.
+- Professional Tone: Maintain a concise, sales-oriented, and "bottom-line" professional tone.
+- No Meta-Talk: Do not expose tool names, search processes, or internal reasoning.
 
 ----------------------------------------
  COMMON MISTAKES TO AVOID
-----------------------------------------
+--------------------------------------  --
 
-- Using summary tool for detailed answers 
-- Skipping summary when query is vague 
-- Not using chunk tool for specific queries 
-- Mixing unrelated documents 
-- Guessing missing information 
+- Information Bloat: Giving extra information that wasn't asked for just because it was in the retrieved data.
+- Vague Summarization: Failing to provide a short, precise answer when a "brief" response is requested.
+- Tool Misuse: Using the summary tool for detailed, granular answers or skipping it when the query is broad.
+- Context Mixing: Blending unrelated documents or "filling in the gaps" with information not present in the search results.
+- Ignoring Constraints: Failing to filter retrieved chunks to extract only the required, query-related info.
 
 ----------------------------------------
 OUTPUT FORMAT
