@@ -1,4 +1,4 @@
-from langchain_community.document_loaders import DirectoryLoader, TextLoader ,PyPDFLoader , Docx2txtLoader
+from langchain_community.document_loaders import DirectoryLoader, TextLoader ,PyPDFLoader , Docx2txtLoader, UnstructuredPowerPointLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAI, OpenAIEmbeddings
 from langchain_core.prompts import PromptTemplate
@@ -152,6 +152,110 @@ def storing_chunks(chunks: list , document_id , doc: str, sharepoint_url: str) -
 
 
 
+def process_single_document(doc_tuple):
+    document_id, doc, sharepoint_url, indexed = doc_tuple
+    print("\n\n")
+    print(f"Processing: {doc}")
+    if doc.endswith('.pdf'):
+        loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=PyPDFLoader)
+    elif doc.endswith('.txt'):
+        loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=TextLoader)
+    elif doc.endswith('.docx'):
+        loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=Docx2txtLoader)
+    elif doc.endswith('.pptx') or doc.endswith('.ppt'):
+        loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=UnstructuredPowerPointLoader)
+    else:
+        print(f"Unsupported file type for {doc}. Skipping.")
+        return False
+    
+    try:
+        loaded_doc = loader.load()  
+        print(f"[OK] Loaded {doc} from directory.")
+    except Exception as e:
+        print(f"[FAIL] Error loading document {doc}: {e}")
+        return False
+
+    # Extract and chunk text
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=100
+    )
+    chunks = text_splitter.split_documents(loaded_doc)
+    page_content = " ".join([d.page_content for d in loaded_doc])
+    
+    # Generate Summary
+    summary = generate_summary(page_content)
+    if summary == "":
+        print(f"Failed to generate summary for {doc}. Skipping storage.")
+        return False
+
+    # Store summary in PostgreSQL
+    res = storing_summary(summary, document_id, doc, sharepoint_url)
+    if "error" in res:
+        print(f"Error storing summary for {doc}: {res['error']}")
+        return False
+        
+    print("Reached Chunking Phase")
+    
+    # Store chunks in PostgreSQL
+    res = storing_chunks(chunks, document_id, doc, sharepoint_url)
+    if "error" in res:
+        print(f"Errors storing chunks for {doc}: {res['error']}")
+        return False
+        
+    print(f"Done indexing {doc}")
+    
+    try:
+        cur = conn.cursor()
+        update_query = """
+            UPDATE documents 
+            SET indexed = TRUE , ingestion_status = 'completed' 
+            WHERE file_name = %s
+        """
+        cur.execute(update_query, (doc.strip(),))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        cur.close()
+        print(f"Error updating document status for {doc}: {e}")
+        return False
+        
+    return True
+
+def ingest_document_by_name(doc_name: str, sharepoint_url: str = ""):
+    """
+    Ingest a single document by name. If it doesn't exist in the database, 
+    create a new record with the provided sharepoint_url and proceed.
+    """
+    try:
+        cur = conn.cursor()
+        search_query = """
+            SELECT document_id, file_name, sharepoint_url, indexed
+            FROM documents
+            WHERE file_name = %s;
+        """
+        cur.execute(search_query, (doc_name,))
+        doc_tuple = cur.fetchone()
+        
+        if not doc_tuple:
+            print(f"Document '{doc_name}' not found in DB. Creating new entry...")
+            insert_query = """
+                INSERT INTO documents (file_name, sharepoint_url)
+                VALUES (%s, %s)
+                RETURNING document_id;
+            """
+            cur.execute(insert_query, (doc_name, sharepoint_url))
+            document_id = cur.fetchone()[0]
+            conn.commit()
+            doc_tuple = (document_id, doc_name, sharepoint_url, False)
+            
+        cur.close()
+    except Exception as e:
+        print(f"Error handling document info for {doc_name}: {e}")
+        return False
+
+    return process_single_document(doc_tuple)
+
 def upload_documents():
     docs = []
     try:
@@ -166,64 +270,30 @@ def upload_documents():
         cur.close()
     except Exception as e:
         cur.close()
-        print("Error Fetching index pending documents : {e} ")
+        print(f"Error Fetching index pending documents : {e}")
         return
 
     print(f"\n\nUploading {len(docs)} documents in VectorDB....\n")
     for doc_tuple in docs:
-        document_id , doc, sharepoint_url , indexed = doc_tuple
-        if doc.endswith('.pdf'):
-            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=PyPDFLoader)
-        elif doc.endswith('.txt'):
-            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=TextLoader)
-        elif doc.endswith('.docx'):
-            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=Docx2txtLoader)
-        else:
-            print(f"Unsupported file type for {doc}. Skipping.")
-            continue
+        process_single_document(doc_tuple)
         
-        loaded_doc = loader.load()  
-        print(f"✅ Loaded {doc} from directory.")
-        # Extract and chunk text
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=100
-        )
-        chunks = text_splitter.split_documents(loaded_doc)
-        page_content = " ".join([doc.page_content for doc in loaded_doc])
-        # Generate Summary
-        summary = generate_summary(page_content)
-        if summary == "":
-            print(f"Failed to generate summary for {doc}. Skipping storage.")
-            continue
-
-        # Store summary in PostgreSQL
-        res = storing_summary(summary , document_id , doc , sharepoint_url)
-        if "error" in res:
-            print(f"Error storing summary for {doc}: {res['error']}")
-            continue
-        print("Reached Chunking Phase")
-        # Store chunks in PostgreSQL
-        res = storing_chunks(chunks , document_id , doc ,sharepoint_url)
-        if "error" in res:
-            print(f"Errors storing chunks for {doc}: {res['error']}")
-            continue
-        print(f"Done indexing {doc}")
-        try:
-            cur = conn.cursor()
-            update_query = """
-                UPDATE documents 
-                SET indexed = TRUE , ingestion_status = 'completed' 
-                WHERE file_name = %s
-            """
-            cur.execute(update_query, (doc.strip(),))
-            conn.commit()
-            cur.close()
-        except Exception as e:
-            cur.close()
-            print(f"Error updating document status for {doc}: {e}")
     conn.close()
     print("\nAll documents uploaded successfully!\n\n")
 
 if __name__ == "__main__":
-    upload_documents()
+    print("Select an ingestion option:")
+    print("1. Process all pending documents from the database")
+    print("2. Ingest a specific document by name from downloaded_documents")
+    choice = input("Enter your choice (1 or 2): ").strip()
+    
+    if choice == '1':
+        upload_documents()
+    elif choice == '2':
+        doc_name = input("Enter the exact file name (e.g., 'presentation.pptx'): ").strip()
+        sharepoint_url = input("Enter the SharePoint URL (optional, press Enter to skip): ").strip()
+        if doc_name:
+            ingest_document_by_name(doc_name, sharepoint_url)
+        else:
+            print("Error: File name cannot be empty.")
+    else:
+        print("Invalid choice. Exiting.")

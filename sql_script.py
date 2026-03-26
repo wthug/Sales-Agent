@@ -64,6 +64,32 @@ class Database:
                 ''')
                 print("[OK] users table initialized")
 
+                # Conversations table
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS conversations (
+                        conversation_id SERIAL PRIMARY KEY,
+                        user_id INT REFERENCES users(id) ON DELETE CASCADE,
+                        title VARCHAR(255) DEFAULT 'New Conversation',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                print("[OK] conversations table initialized")
+
+                # Messages table
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS messages (
+                        message_id SERIAL PRIMARY KEY,
+                        conversation_id INT REFERENCES conversations(id) ON DELETE CASCADE,
+                        role VARCHAR(50) NOT NULL,
+                        content TEXT NOT NULL,
+                        time_str VARCHAR(255),
+                        sources JSONB DEFAULT '[]',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                print("[OK] messages table initialized")
+
                 # Folders table
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS folders (

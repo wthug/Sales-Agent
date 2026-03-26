@@ -86,13 +86,15 @@ def search_summary_tool(query: str):
 @traceable(run_type="tool", name="Search_Chunk")
 def search_chunk_tool(query:str) -> Tuple[str,List[Document]]:
     content, docs = search_similar_chunk(query)
-    print("------ Retrieved Summary (CONTENT) ------")
+    print("\n------ Retrieved Summary (CONTENT) ------\n")
     print(content)
-    print("------ Retrieved Docs (ARTIFACT) ------")
-    print(docs)
+    print("\n------ Retrieved Docs (ARTIFACT) ------\n")
+    # print(docs)
     # Optional: add source info for LLM clarity
     source_info_list = []
     for i, doc in enumerate(docs):
+        print(doc)
+        print("\n")
         try:
             if isinstance(doc, dict):
                 document_name = doc.get("document_name", "Unknown")

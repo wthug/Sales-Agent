@@ -1,4 +1,4 @@
-import requests
+﻿import requests
 import os
 import psycopg2
 # Load environment variables
@@ -18,9 +18,9 @@ token_data = {
 response = requests.post(token_url, data=token_data)
 access_token = response.json().get("access_token")
 if access_token:
-    print("✅ Token generated")
+    print("[OK] Token generated")
 else:
-    print("❌ Token failed", response.text)
+    print("[FAIL] Token failed", response.text)
     exit()
 
 headers = {
@@ -35,13 +35,13 @@ site_url = "https://graph.microsoft.com/v1.0/sites/sutramanagement.sharepoint.co
 response = requests.get(site_url, headers=headers)
 
 if response.status_code != 200:
-    print("❌ Site Error:", response.text)
+    print("[FAIL] Site Error:", response.text)
     exit()
 
 site_data = response.json()
 site_id = site_data["id"]
 
-print("✅ Site Found!")
+print("[OK] Site Found!")
 print("Site ID:", site_id)
 
 
@@ -53,13 +53,13 @@ drive_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive"
 response = requests.get(drive_url, headers=headers)
 
 if response.status_code != 200:
-    print("❌ Drive Error:", response.text)
+    print("[FAIL] Drive Error:", response.text)
     exit()
 
 drive_data = response.json()
 drive_id = drive_data["id"]
 
-print("✅ Document Library Found:", drive_data["name"])
+print("[OK] Document Library Found:", drive_data["name"])
 
 
 # create folder to store documents
@@ -84,7 +84,7 @@ try:
     )
     print("Connected to PostgreSQL successfully!")
 except Exception as e:
-    print("❌ PostgreSQL Connection Error:", e)
+    print("[FAIL] PostgreSQL Connection Error:", e)
     exit()
 
 
@@ -93,7 +93,7 @@ def update_db(file_name, sharepoint_url):
     try:
         cur = conn.cursor()
         update_query = """
-            INSERT INTO temp_documents (file_name , sharepoint_url) 
+            INSERT INTO documents (file_name , sharepoint_url) 
             VALUES (%s, %s)
         """
         cur.execute(
@@ -105,7 +105,7 @@ def update_db(file_name, sharepoint_url):
         print(f"Database updated with {file_name}")
     except Exception as e:
         cur.close()
-        print(f"❌ Error updating database with {file_name}: {e}") 
+        print(f"[FAIL] Error updating database with {file_name}: {e}") 
 
 # Download file from SharePoint
 def download_file(drive_id, item_id, file_name, web_url ):
@@ -117,11 +117,11 @@ def download_file(drive_id, item_id, file_name, web_url ):
         with open(file_path, "wb") as f:
             for chunk in res.iter_content(chunk_size=8192):
                 f.write(chunk)
-        print(f"⬇️ Downloaded: {file_name}")
+        print(f"[DL] Downloaded: {file_name}")
         # Updating database with file name and sharepoint url
         update_db(file_name,web_url)
     else:
-        print(f"❌ Failed to download {file_name}: {res.text}")      
+        print(f"[FAIL] Failed to download {file_name}: {res.text}")      
 
 
 # Recursively get all items in the document library
@@ -133,19 +133,22 @@ def get_all_items(drive_id, folder="root", path=""):
         for item in data.get("value", []):
             current_path = f"{path}/{item['name']}"
             if "folder" in item:
-                print(f"📁 {current_path}")
+                print(f"[DIR] {current_path}")
                 get_all_items(drive_id,  f"items/{item['id']}", current_path)
             else:
-                print(f"📄 {current_path}")
+                print(f"[FILE] {current_path}")
                 # Cross check if file already exists to avoid duplicates
                 if os.path.exists(os.path.join(DOWNLOAD_FOLDER, item["name"])):
-                    print(f"⚠️ Skipping {item['name']} (already exists)")
+                    print(f"[WARN] Skipping {item['name']} (already exists)")
                     continue                
-                # ✅ DOWNLOAD ONLY PDF AND DOCX FILES
-                if item["name"].lower().endswith(".pdf"):
-                    download_file(drive_id, item["id"], item["name"],item.get("webUrl", ""))
-                # if item["name"].lower().endswith(".docx"):
-                #     download_file(drive_id, item["id"], item["name"])
+                # [OK] DOWNLOAD PDF, DOCX, AND PPTX FILES
+                # if item["name"].lower().endswith(".pdf"):
+                #     download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                if item["name"].lower().endswith(".docx"):
+                    download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                # elif item["name"].lower().endswith(".pptx") or item["name"].lower().endswith(".ppt"):
+                #     download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+       
         url = data.get("@odata.nextLink")
 
 def download_documents():

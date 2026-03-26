@@ -12,11 +12,79 @@ export default function Chat() {
   const textareaRef = useRef(null);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [conversations, setConversations] = useState([]);
+  const [currentConversationId, setCurrentConversationId] = useState(null);
+
+  const activeConversationRef = useRef(currentConversationId);
+  const draftIdRef = useRef(Date.now()); // Tracks the exact instance of a "New Chat"
+
+  useEffect(() => {
+    activeConversationRef.current = currentConversationId;
+  }, [currentConversationId]);
+
+  const fetchConversations = async (token) => {
+    try {
+      const res = await fetch('/api/conversations', {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setConversations(data);
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const selectConversation = async (id) => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/conversations/${id}/messages`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        cache: 'no-store'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const formatted = data.map(msg => {
+          let parsedSources = [];
+          if (typeof msg.sources === 'string') {
+            try { parsedSources = JSON.parse(msg.sources); } catch (e) {}
+          } else if (Array.isArray(msg.sources)) {
+            parsedSources = msg.sources;
+          }
+          
+          return {
+            id: msg.id,
+            role: msg.role,
+            text: msg.content,
+            time: msg.time_str || (msg.created_at ? new Date(msg.created_at).toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'}) : 'Unknown Time'),
+            sources: parsedSources.map(s => ({
+              name: s.document_name || s.name || 'Unknown',
+              url: s.document_sharepoint_url || s.url || null
+            }))
+          };
+        });
+        setMessages(formatted);
+        setCurrentConversationId(id);
+      }
+    } catch (e) { console.error(e); }
+    finally { setIsLoading(false); }
+  };
+
+  const startNewChat = () => {
+    setCurrentConversationId(null);
+    draftIdRef.current = Date.now();
+    setMessages([{ id: Date.now(), role: 'assistant', text: 'Hello! I am your AI assistant. How can I help you today?', time: new Date().toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'}) }]);
+  };
 
   // Check token on mount
   useEffect(() => {
-    if (!localStorage.getItem('token')) {
+    const token = localStorage.getItem('token');
+    if (!token) {
       navigate('/login');
+    } else {
+      fetchConversations(token);
     }
   }, [navigate]);
 
@@ -63,7 +131,7 @@ export default function Chat() {
       id: Date.now(),
       role: 'user',
       text: input,
-      time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+      time: new Date().toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'})
     };
     
     const updatedMessages = [...messages, newUserMsg];
@@ -72,9 +140,31 @@ export default function Chat() {
     setIsLoading(true);
 
     try {
+      let activeConvId = currentConversationId;
+      if (!activeConvId) {
+         const userQuery = newUserMsg.text.trim();
+         const titleStr = userQuery.length > 30 ? userQuery.substring(0, 30) + '...' : userQuery;
+         const convRes = await fetch('/api/conversations', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ title: titleStr })
+         });
+         
+         if (convRes.ok) {
+            const convData = await convRes.json();
+            activeConvId = convData.id;
+            setCurrentConversationId(activeConvId);
+            fetchConversations(token);
+         }
+      }
+
       const apiMessages = updatedMessages.map(m => ({
         role: m.role,
-        content: m.text
+        content: m.text,
+        time: m.time
       }));
 
       const res = await fetch('/api/chat', {
@@ -83,7 +173,7 @@ export default function Chat() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ messages: apiMessages })
+        body: JSON.stringify({ messages: apiMessages, conversation_id: activeConvId })
       });
 
       if (res.status === 401) {
@@ -103,21 +193,40 @@ export default function Chat() {
         id: Date.now() + 1,
         role: 'assistant',
         text: data.content || data.error || 'Sorry, no response generated.',
-        time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+        time: data.time_str || new Date().toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'}),
         sources: sources
       };
       
-      setMessages(prev => [...prev, newAiMsg]);
+      let targetConvId = activeConvId;
+      const originalDraftId = draftIdRef.current;
+
+      const isStillViewingTarget = targetConvId 
+        ? (activeConversationRef.current === targetConvId)
+        : (activeConversationRef.current === null && draftIdRef.current === originalDraftId);
+
+      if (isStillViewingTarget) {
+        setMessages(prev => [...prev, newAiMsg]);
+      }
+
+      if (data.conversation_id) {
+        fetchConversations(token);
+      }
     } catch (err) {
-      const errorMsg = {
-        id: Date.now() + 1,
-        role: 'assistant',
-        text: 'Sorry, I encountered an error connecting to the server.',
-        time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
-      };
-      setMessages(prev => [...prev, errorMsg]);
+      const matchTarget = activeConvId ? (activeConversationRef.current === activeConvId) : (activeConversationRef.current === null && draftIdRef.current === draftIdRef.current);
+      if (matchTarget) {
+        const errorMsg = {
+          id: Date.now() + 1,
+          role: 'assistant',
+          text: 'Sorry, I encountered an error connecting to the server.',
+          time: new Date().toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'})
+        };
+        setMessages(prev => [...prev, errorMsg]);
+      }
     } finally {
-      setIsLoading(false);
+      const matchTarget = activeConvId ? (activeConversationRef.current === activeConvId) : (activeConversationRef.current === null && draftIdRef.current === draftIdRef.current);
+      if (matchTarget) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -125,20 +234,31 @@ export default function Chat() {
     <div className="flex h-screen bg-white">
       {/* Sidebar - Desktop Only */}
       <div className="hidden w-80 flex-col border-r border-gray-100 bg-gray-50/30 lg:flex">
-        <div className="flex h-16 items-center justify-between border-b border-gray-100 px-6">
+        <div className="flex h-16 items-center justify-between border-b border-gray-100 px-6 shrink-0">
           <div className="flex items-center gap-2 font-semibold text-gray-900">
             <Bot className="h-6 w-6 text-blue-600" />
             <span>AI Assistant</span>
           </div>
         </div>
         
+        <div className="px-4 py-3 border-b border-gray-100 shrink-0">
+          <button onClick={startNewChat} className="w-full flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors">
+            <MessageSquare className="h-4 w-4" />
+            New Chat
+          </button>
+        </div>
+        
         <div className="flex-1 overflow-y-auto py-4">
           <div className="px-4 text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Recent Chats</div>
           <div className="space-y-1 px-3">
-            {[1, 2, 3].map((_, i) => (
-              <button key={i} className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-600 hover:bg-white hover:shadow-sm transition-all focus:outline-none">
-                <MessageSquare className="h-4 w-4 text-gray-400 group-hover:text-blue-500" />
-                <div className="truncate text-left font-medium">Discussion about React hooks and best practices {i+1}</div>
+            {conversations.map((conv) => (
+              <button 
+                key={conv.id} 
+                onClick={() => selectConversation(conv.id)}
+                className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all focus:outline-none ${currentConversationId === conv.id ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-white hover:shadow-sm'}`}
+              >
+                <MessageSquare className={`h-4 w-4 shrink-0 ${currentConversationId === conv.id ? 'text-blue-500' : 'text-gray-400 group-hover:text-blue-500'}`} />
+                <div className="truncate text-left font-medium">{conv.title || 'Conversation'}</div>
               </button>
             ))}
           </div>
