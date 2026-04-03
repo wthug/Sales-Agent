@@ -302,7 +302,7 @@ def process_single_document(doc_tuple):
     #     print("\n----------------------------------------\n")
 
     # return 
-    
+
     # Generate Summary
     summary = generate_summary(page_content)
     if summary == "":
@@ -396,7 +396,7 @@ def upload_documents():
     print(f"\n\nUploading {len(docs)} documents in VectorDB....\n")
     for doc_tuple in docs:
         process_single_document(doc_tuple)
-        break
+        
         
     conn.close()
     print("\nAll documents uploaded successfully!\n\n")
