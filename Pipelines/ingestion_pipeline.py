@@ -3,6 +3,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAI, OpenAIEmbeddings
 from langchain_core.prompts import PromptTemplate
 from langsmith import traceable
+from docx import Document
+
 
 from pgvector.psycopg2 import register_vector
 import psycopg2
@@ -125,7 +127,7 @@ def storing_chunks(chunks: list , document_id , doc: str, sharepoint_url: str) -
             try:
                 number+=1
                 print(f"Chunk No:{number}")
-                chunk_embeddings = get_embeddings(chunk.page_content)
+                chunk_embeddings = get_embeddings(chunk)
                 if not chunk_embeddings:
                     errors.append({"error" : f"Failed to generate embeddings for chunk {index + 1}."})
                     continue
@@ -135,7 +137,7 @@ def storing_chunks(chunks: list , document_id , doc: str, sharepoint_url: str) -
                 """
                 cur.execute(
                     store_query,
-                    ( document_id, index, chunk.page_content, chunk_embeddings, doc, sharepoint_url)
+                    ( document_id, index, chunk, chunk_embeddings, doc, sharepoint_url)
                 )
                 conn.commit()
             except Exception as e:
@@ -152,9 +154,93 @@ def storing_chunks(chunks: list , document_id , doc: str, sharepoint_url: str) -
 
 
 
+def doc_loader_splitter(title):
+    from collections import defaultdict
+
+    doc = Document(title)
+
+    sections = []
+
+    current_section = {
+        "heading": None,
+        "content": "",
+        "tables": []
+    }
+
+    for item in doc.iter_inner_content():  # Iterates paras + tables in order
+        # print(item)
+        if hasattr(item, 'style') and 'heading' in item.style.name.lower():
+            # Save previous section
+            if current_section["heading"]:
+                sections.append(current_section)
+            current_section["heading"] = item.text.strip()
+            current_section["content"] = ""
+            current_section["tables"] = []
+        elif hasattr(item, 'table'):  # No, item is table
+            # Convert table to dict
+            table_data = []
+            for row in item.rows:
+                row_data = [cell.text.strip() for cell in row.cells]
+                table_data.append(row_data)
+            # print(f"{table_data}\n")
+            current_section["tables"].append(table_data)
+        else:
+            current_section["content"] += item.text + "  "
+
+    
+    if current_section["heading"]:
+        sections.append(current_section)
+
+    return sections
+
+def row_to_str(row):
+    """
+    Converts a list (row) into a readable string: "ColName: Value | ColName: Value"
+    """
+    row_str = "..|"
+    for item in row:
+        row_str += f"{item} | "
+    row_str += ".."
+    return row_str
+
+def prepare_llm_chunks(tables, heading, chunk_size=5):
+    """
+    Chunks tables into formatted strings optimized for LLM embeddings.
+    """
+    final_string_chunks = []
+
+    for table in tables:
+        if len(table) < 2:
+            continue
+            
+        # Row 0 is the schema (e.g., "Name (str)")
+        schema = table[0]
+        data_rows = table[1:]
+        
+        for i in range(0, len(data_rows), chunk_size):
+            current_batch = data_rows[i : i + chunk_size]
+            
+            # Start building the string for this specific chunk
+            chunk_lines = []
+            chunk_lines.append(f"{heading}\n")
+            chunk_lines.append(row_to_str(schema))
+
+            for row in current_batch:
+                # Convert each row into a readable string: "ColName: Value | ColName: Value"
+                chunk_lines.append(row_to_str(row))
+            
+            # Join everything with newlines to create one solid block of text
+            
+            chunk_str = "\n".join(chunk_lines)
+            final_string_chunks.append(chunk_str)
+            
+    return final_string_chunks
+
+
+
 def process_single_document(doc_tuple):
     document_id, doc, sharepoint_url, indexed = doc_tuple
-    print("\n\n")
+    print("\n")
     print(f"Processing: {doc}")
     if doc.endswith('.pdf'):
         loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=PyPDFLoader)
@@ -168,20 +254,54 @@ def process_single_document(doc_tuple):
         print(f"Unsupported file type for {doc}. Skipping.")
         return False
     
+
     try:
         loaded_doc = loader.load()  
         print(f"[OK] Loaded {doc} from directory.")
     except Exception as e:
         print(f"[FAIL] Error loading document {doc}: {e}")
         return False
+    page_content = " ".join([d.page_content for d in loaded_doc])
 
-    # Extract and chunk text
+
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
         chunk_overlap=100
     )
-    chunks = text_splitter.split_documents(loaded_doc)
-    page_content = " ".join([d.page_content for d in loaded_doc])
+    # Chunking 
+    f=True
+    # ....for docx
+    if doc.endswith('.docx'):
+        title = "./downloaded_documents/"+doc
+        sections = doc_loader_splitter(title)
+        if sections:
+            f=False
+            print(f"docx {doc} split by headers.......\n\n")
+            chunks = []
+            for section in sections:
+                pre_chunks = text_splitter.split_text(section['content'])
+                for chunk in pre_chunks:
+                    chunks.append(f"{section['heading']}:\n\n{chunk}")
+                table_chunks = prepare_llm_chunks(section['tables'], section['heading'])
+                chunks.extend(table_chunks)
+                
+
+
+    # ....for pdfs , pptx and if docx fails
+    if f:
+        
+        pre_chunks = text_splitter.split_documents(loaded_doc)
+        chunks = []
+        for chunk in pre_chunks:
+            chunks.append(chunk.page_content)
+        print(f"{doc} split by splitter.......\n\n")
+
+    # for chunk in chunks:
+    #     print(f"\n{len(chunk)}\n")
+    #     print(chunk)
+    #     print("\n----------------------------------------\n")
+
+    # return 
     
     # Generate Summary
     summary = generate_summary(page_content)
@@ -276,6 +396,7 @@ def upload_documents():
     print(f"\n\nUploading {len(docs)} documents in VectorDB....\n")
     for doc_tuple in docs:
         process_single_document(doc_tuple)
+        break
         
     conn.close()
     print("\nAll documents uploaded successfully!\n\n")

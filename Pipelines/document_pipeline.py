@@ -142,12 +142,12 @@ def get_all_items(drive_id, folder="root", path=""):
                     print(f"[WARN] Skipping {item['name']} (already exists)")
                     continue                
                 # [OK] DOWNLOAD PDF, DOCX, AND PPTX FILES
-                # if item["name"].lower().endswith(".pdf"):
-                #     download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
-                if item["name"].lower().endswith(".docx"):
+                if item["name"].lower().endswith(".pdf"):
                     download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
-                # elif item["name"].lower().endswith(".pptx") or item["name"].lower().endswith(".ppt"):
-                #     download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                elif item["name"].lower().endswith(".docx"):
+                    download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                elif item["name"].lower().endswith(".pptx") or item["name"].lower().endswith(".ppt"):
+                    download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
        
         url = data.get("@odata.nextLink")
 
