@@ -76,9 +76,7 @@ export default function Login() {
               <label className="block text-sm font-medium text-gray-700" htmlFor="password">
                 Password
               </label>
-              <a href="#" className="text-sm font-medium text-blue-600 hover:text-blue-500">
-                Forgot password?
-              </a>
+              
             </div>
             <div className="relative">
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
@@ -106,10 +104,7 @@ export default function Login() {
         </form>
 
         <p className="mt-8 text-center text-sm text-gray-500">
-          Don't have an account?{' '}
-          <Link to="/register" className="font-semibold text-blue-600 hover:text-blue-500">
-            Sign up
-          </Link>
+          Don't have an account? Contact Admin
         </p>
       </div>
     </div>
