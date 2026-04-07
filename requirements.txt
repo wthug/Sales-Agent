@@ -13,3 +13,4 @@ PyJWT
 unstructured
 python-pptx
 python-magic
+langgraph

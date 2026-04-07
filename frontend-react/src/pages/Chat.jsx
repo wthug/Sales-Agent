@@ -32,7 +32,9 @@ export default function Chat() {
         const data = await res.json();
         setConversations(data);
       }
+      console.log("conversations fetched successfully!!")
     } catch (e) { console.error(e); }
+    
   };
 
   const selectConversation = async (id) => {

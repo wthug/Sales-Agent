@@ -65,7 +65,7 @@ def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> list
             # """
             if doc_name:
                 search_query = """
-                    SELECT document_id, chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
+                    SELECT document_id, page_number,chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
                     FROM all_document_chunks
                     WHERE document_name = %s
                     ORDER BY embedding <=> %s::vector
@@ -74,7 +74,7 @@ def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> list
                 cur.execute(search_query, (embedding_vector, doc_name, embedding_vector, top_k))
             else:
                 search_query = """
-                    SELECT document_id, chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
+                    SELECT document_id, page_number,chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
                     FROM all_document_chunks
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s;
@@ -86,9 +86,10 @@ def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> list
             formatted_content = ""
             documents = []
             for row in results:
-                document_id, chunk_text, document_name, similarity,document_sharepoint_url = row
+                document_id, page_number, chunk_text, document_name, similarity,document_sharepoint_url = row
                 formatted_content += f"""
                 Document: {document_name}
+                Page Number: {page_number}
                 Similarity Score: {similarity:.2f}
                 Chunk:
                 {chunk_text}
@@ -96,6 +97,7 @@ def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> list
                 """
                 documents.append({
                     "document_id": document_id,
+                    "page_number": page_number,
                     "document_name": document_name,
                     "similarity": similarity,
                     "document_sharepoint_url":document_sharepoint_url
