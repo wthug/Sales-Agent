@@ -124,9 +124,13 @@ def get_conversations():
     if not conn: return jsonify({"error": "Database connection failed"}), 500
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id, title, created_at, updated_at FROM conversations WHERE user_id = %s ORDER BY updated_at DESC", (request.user_id,))
-            return jsonify(cur.fetchall()), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
+            cur.execute("SELECT conversation_id, title, created_at, updated_at FROM conversations WHERE user_id = %s ORDER BY updated_at DESC", (request.user_id,))
+            data = cur.fetchall()
+            print(data)
+            return jsonify(data), 200
+    except Exception as e: 
+        print(f"error fetching conversations...:{e}")
+        return jsonify({"error": str(e)}), 500
     finally: Database.put_connection(conn)
 
 @app.route("/api/conversations", methods=["POST"])
@@ -139,7 +143,7 @@ def create_conversation():
     if not conn: return jsonify({"error": "Database connection failed"}), 500
     try:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO conversations (user_id, title) VALUES (%s, %s) RETURNING id", (request.user_id, title))
+            cur.execute("INSERT INTO conversations (user_id, title) VALUES (%s, %s) RETURNING conversation_id", (request.user_id, title))
             conv_id = cur.fetchone()[0]
         conn.commit()
         return jsonify({"id": conv_id, "title": title}), 201
@@ -156,11 +160,14 @@ def get_messages(col_id):
     if not conn: return jsonify({"error": "Database connection failed"}), 500
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id FROM conversations WHERE id = %s AND user_id = %s", (col_id, request.user_id))
+            cur.execute("SELECT conversation_id FROM conversations WHERE conversation_id = %s AND user_id = %s", (col_id, request.user_id))
             if not cur.fetchone(): return jsonify({"error": "Conversation not found"}), 404
-            cur.execute("SELECT id, role, content, sources, time_str, created_at FROM messages WHERE conversation_id = %s ORDER BY id ASC", (col_id,))
+            cur.execute("SELECT message_id, role, content, sources, time_str, created_at FROM messages WHERE conversation_id = %s ORDER BY id ASC", (col_id,))
+            print("messages fetched successfully!!")
             return jsonify(cur.fetchall()), 200
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception as e: 
+        print(f"error fetching messages...:{e}")
+        return jsonify({"error": str(e)}), 500
     finally: Database.put_connection(conn)
 
 @app.route("/api/chat", methods=["POST", "OPTIONS"])
@@ -219,32 +226,34 @@ def chat_endpoint():
                 # 🔹 NEW FORMAT (dict)
                 if isinstance(doc, dict):
                     doc_name = doc.get("document_name")
+                    page_num = doc.get("page_number")
 
-                    if doc_name in my_set:
+                    if (doc_name, page_num) in my_set:
                         continue
-                    my_set.add(doc_name)
+                    my_set.add((doc_name, page_num))
 
                     result["artifact"].append({
                         "document_id": str(doc.get("document_id")) if doc.get("document_id") else "",
-                        "document_name": doc.get("document_name"),
+                        "document_name": doc_name,
                         "similarity": doc.get("similarity"),
-                        "document_sharepoint_url":doc.get("document_sharepoint_url")
+                        "document_sharepoint_url": doc.get("document_sharepoint_url"),
+                        "page_number": page_num
                     })
                 # 🔹 OLD FORMAT (tuple)
                 elif isinstance(doc, (list, tuple)) and len(doc) >= 5:
-                    doc_id, doc_text, doc_name, score,document_sharepoint_url = doc
-
-                    if doc_name in my_set:
+                    doc_id, doc_text, doc_name, score, document_sharepoint_url = doc[:5]
+                    
+                    if (doc_name, None) in my_set:
                         continue
                     
-                    my_set.add(doc_name)
+                    my_set.add((doc_name, None))
                     
-
                     result["artifact"].append({
                         "document_id": str(doc_id) if doc_id else "",
                         "document_name": doc_name,
                         "similarity": score,
-                        "document_sharepoint_url": document_sharepoint_url
+                        "document_sharepoint_url": document_sharepoint_url,
+                        "page_number": None
                     })
             except Exception as e:
                 print("Error processing doc:", e)
@@ -258,7 +267,7 @@ def chat_endpoint():
                 assistant_time = datetime.datetime.now().strftime("%b %d, %Y, %I:%M %p")
                 with conn.cursor() as cur:
                     cur.execute("INSERT INTO messages (conversation_id, role, content, sources, time_str) VALUES (%s, %s, %s, %s, %s)", (conversation_id, "assistant", result["content"], json.dumps(result["artifact"]), assistant_time))
-                    cur.execute("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", (conversation_id,))
+                    cur.execute("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE conversation_id = %s", (conversation_id,))
                 conn.commit()
                 result["conversation_id"] = conversation_id
                 result["time_str"] = assistant_time

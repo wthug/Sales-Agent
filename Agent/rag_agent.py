@@ -2,7 +2,12 @@
 import sys
 
 from langchain_openai import ChatOpenAI
-from langchain.agents import create_agent 
+from typing import List, Dict, Any, Optional, Annotated
+from typing_extensions import TypedDict
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, ToolMessage
+from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
+from pydantic import BaseModel, Field 
 
 import os
 from dotenv import load_dotenv
@@ -116,127 +121,215 @@ def search_chunk_tool(query: str, doc_name: str = None) -> Tuple[str, List[Docum
 
 
 # -------------------------
-# Agent Builder Function
+# Agent Builder Function (LangGraph)
 # -------------------------
 
-def create_chat_agent():
+class GraphState(TypedDict):
+    messages: Annotated[list, add_messages]
+    current_query: str
+    target_document: str
+    summary_query: str
+    summary_iterations: int
+    chunk_query: str
+    responses: List[str]
+    chunk_iterations: int
+    current_action: str
 
+class AnalyzeQueryOutput(BaseModel):
+    user_query: str = Field(description="The core user question to answer.")
+    action: str = Field(description="Must be 'summary', 'chunk', or 'answer'. 'summary' to search summaries, 'chunk' to search chunks directly.")
+    tool_query: str = Field(description="The search query for the chosen tool.")
+    target_document: str = Field(description="If action is 'chunk', the document name if known.")
+
+class EvaluateSummaryOutput(BaseModel):
+    action: str = Field(description="Decision on next step. Must be 'answer', 'chunk', or 'retry_summary'.")
+    target_document: str = Field(description="The name of the document identified from the summary, if any.")
+    chunk_query: str = Field(description="If action is 'chunk', the query to search matching chunks.")
+    new_summary_query: str = Field(description="If action is 'retry_summary', the new summary query.")
+
+class EvaluateChunksOutput(BaseModel):
+    action: str = Field(description="Decision on next step. Must be 'answer' or 'retry_chunk'.")
+    useful_chunks: List[str] = Field(description="Facts extracted from chunks relevant to the user query.")
+    new_chunk_query: str = Field(description="If action is 'retry_chunk', the new query. Max two retries.")
+
+def get_llm():
     open_api_key = os.getenv("OPENAI_API_KEY")
-    
-    llm = ChatOpenAI(
-        model="gpt-5-mini",
-        api_key=open_api_key,
-        temperature=0.0
-    )
+    return ChatOpenAI(model="gpt-4o-mini", api_key=open_api_key, temperature=0.0)
 
-    # llm = llm.with_structured_output(AgentResponse)
+def analyze_query_node(state: GraphState):
+    llm = get_llm().with_structured_output(AnalyzeQueryOutput)
+    msgs = state.get("messages", [])
+    history = "\n".join([f"{getattr(m, 'type', 'unknown')}: {getattr(m, 'content', '')}" for m in msgs])
+    prompt = f"""
+Chat History:
+{history}
 
-    tools = [
-        search_summary_tool,
-        search_chunk_tool
-    ]
-
-    system_prompt = """
-You are an intelligent Sales Agent assistant designed to answer user queries using proposal documents.
-
-You will receive chat_history containing the full conversation.
-Your primary goal is to accurately answer the LAST user query using the available tools.
-
-----------------------------------------
- CORE RESPONSIBILITIES
-----------------------------------------
-1. Understand the user’s intent from the latest query
-2. Use chat history for additional context if needed
-3. Identify the most relevant document(s)
-4. Retrieve precise and relevant information
-5. Provide a clear, accurate, and business-relevant response
-
-----------------------------------------
- AVAILABLE TOOLS
-----------------------------------------
-
-1. search_summary_tool
-- Use this to identify the most relevant document(s)
-- Provides high-level summaries of documents
-- Helps when:
-  • Query is vague or broad
-  • No document is explicitly mentioned
-- Maximum 2 calls
-
-2. search_chunk_tool
-- Use this to retrieve detailed and specific information from documents
-- You may pass an optional 'doc_name' argument to narrow the search from the DB and get a more accurate response.
-- Helps when:
-  • You need exact details (pricing, scope, deliverables, timelines, etc.)
-  • You already know which document is relevant
-- Maximum 2 calls
-
-----------------------------------------
- DECISION LOGIC (VERY IMPORTANT)
-----------------------------------------
-
-Step 1: Understand the query
-- If query is vague or document is unknown → use search_summary_tool
-- If query is specific → you may directly use search_chunk_tool
-
-Step 2: Identify document
-- Use summary tool to select the most relevant document
-- DO NOT rely on assumptions
-
-Step 3: Retrieve details
-- Use search_chunk_tool to fetch precise information from the selected document
-- Focus on relevant sections only
-
-Step 4: Generate final answer
-- Combine retrieved information
-- Ensure accuracy and completeness
-
-----------------------------------------
- IMPORTANT RULES
-----------------------------------------
-
-- Query-Lock Precision: Provide only the specific information requested. If a retrieved chunk contains extra data, filter it out and deliver only the direct answer.
-- Brevity by Default: If asked for a "brief" summary, limit the response to 2–3 punchy sentences or high-level bullet points.
-- Zero-Extrapolation: Do not provide "helpful" context, background, or related details unless explicitly triggered by the prompt.
-- NEVER Hallucinate: If information is missing from the tool outputs, clearly state that the information is not found.
-- Source Integrity: Always rely on tool outputs. Never assume or guess missing information.
-- Professional Tone: Maintain a concise, sales-oriented, and "bottom-line" professional tone.
-- No Meta-Talk: Do not expose tool names, search processes, or internal reasoning.
-
-----------------------------------------
- COMMON MISTAKES TO AVOID
---------------------------------------  --
-
-- Information Bloat: Giving extra information that wasn't asked for just because it was in the retrieved data.
-- Vague Summarization: Failing to provide a short, precise answer when a "brief" response is requested.
-- Tool Misuse: Using the summary tool for detailed, granular answers or skipping it when the query is broad.
-- Context Mixing: Blending unrelated documents or "filling in the gaps" with information not present in the search results.
-- Ignoring Constraints: Failing to filter retrieved chunks to extract only the required, query-related info.
-
-----------------------------------------
-OUTPUT FORMAT
-----------------------------------------
-
-- Provide a clear, structured answer
-- Include relevant business details (scope, pricing, deliverables, etc.)
-- Keep response concise and informative
-
+What is the user's latest actual query? 
+If you need general context or don't know the specific document, set action='summary' and create a summary_query. 
+If you know the expected document and need precise details, set action='chunk', the chunk_query, and target_document. 
+If no tool is needed at all, action='answer'.
 """
+    res = llm.invoke(prompt)
+    
+    return {
+        "current_query": res.user_query,
+        "current_action": res.action,
+        "summary_query": res.tool_query if res.action == 'summary' else "",
+        "chunk_query": res.tool_query if res.action == 'chunk' else "",
+        "target_document": res.target_document or ""
+    }
 
+def retrieve_summary_node(state: GraphState):
+    query = state.get("summary_query", state.get("current_query", ""))
+    content, docs = search_similar_summary(query)
+    
+    class CustomToolMessage(ToolMessage):
+        artifact: Any = None
+    
+    tool_msg = CustomToolMessage(content=content, artifact=docs, tool_call_id="summary_search_" + str(state.get("summary_iterations",0)), name="search_summary_tool")
+    
+    return {
+        "messages": [tool_msg],
+        "summary_iterations": state.get("summary_iterations", 0) + 1
+    }
 
-    agent = create_agent(
-        model=llm, 
-        tools=tools, 
-        system_prompt=system_prompt
-    )
+def evaluate_summary_node(state: GraphState):
+    llm = get_llm().with_structured_output(EvaluateSummaryOutput)
+    
+    last_msg_content = state["messages"][-1].content
+    prompt = f"""
+Query: {state.get('current_query', '')}
+Retrieved Summary: {last_msg_content}
 
-    return agent
+You must decide the next step based on the provided summary:
+1. If the exact answer is present in the summary, set action='answer'.
+2. If you know the right document but need specific text details, set action='chunk' and provide the target_document and a chunk_query.
+3. If this summary is useless and we should search summaries again with a different query, set action='retry_summary' and a new_summary_query. (Max 2 retries)
+"""
+    res = llm.invoke(prompt)
+    
+    action = res.action
+    iters = state.get("summary_iterations", 0)
+    if action == "retry_summary" and iters >= 2:
+        action = "answer"
+    
+    return {
+        "current_action": action,
+        "chunk_query": res.chunk_query or "",
+        "target_document": res.target_document or state.get("target_document", ""),
+        "summary_query": res.new_summary_query or ""
+    }
+
+def retrieve_chunks_node(state: GraphState):
+    query = state.get("chunk_query", state.get("current_query", ""))
+    doc_name = state.get("target_document", None)
+    content, docs = search_similar_chunk(query, doc_name=doc_name)
+    
+    class CustomToolMessage(ToolMessage):
+        artifact: Any = None
+        
+    tool_msg = CustomToolMessage(content=content, artifact=docs, tool_call_id="chunk_search_" + str(state.get("chunk_iterations",0)), name="search_chunk_tool")
+    
+    return {
+        "messages": [tool_msg],
+        "chunk_iterations": state.get("chunk_iterations", 0) + 1
+    }
+
+def evaluate_chunks_node(state: GraphState):
+    llm = get_llm().with_structured_output(EvaluateChunksOutput)
+    
+    last_msg_content = state["messages"][-1].content
+    prompt = f"""
+Original Query: {state.get('current_query', '')}
+Retrieved Chunks: {last_msg_content}
+
+Extract any specific facts from the chunks that help answer the query into 'useful_chunks'.
+If we need to search chunks again for a different term to complete the answer, action='retry_chunk' and provide new_chunk_query. Else action='answer'. (Max 2 retries).
+"""
+    res = llm.invoke(prompt)
+    
+    action = res.action
+    iters = state.get("chunk_iterations", 0)
+    if action == "retry_chunk" and iters >= 2:
+        action = "answer"
+        
+    responses = state.get("responses", []) + res.useful_chunks
+    
+    return {
+        "current_action": action,
+        "responses": responses,
+        "chunk_query": res.new_chunk_query or ""
+    }
+
+def generate_answer_node(state: GraphState):
+    llm = get_llm()
+    query = state.get('current_query', '')
+    responses = "\\n".join(state.get("responses", []))
+    last_msg = state['messages'][-1].content if state['messages'] else ""
+    
+    system_prompt = f"""
+You are an intelligent Sales Agent assistant designed to answer user queries using proposal documents.
+Your primary goal is to accurately answer the LAST user query using the available tool responses.
+
+Query to answer: {query}
+
+Accumulated Exact Facts from Chunks: 
+{responses}
+
+Most recent Tool output:
+{last_msg}
+
+Rules: Keep it professional, highly concise. Use only the context provided above.
+"""
+    answer_msg = AIMessage(content=llm.invoke(system_prompt).content)
+    return {"messages": [answer_msg]}
+
+def route_initial(state: GraphState):
+    action = state.get("current_action", "answer")
+    if action == "summary": return "retrieve_summary"
+    if action == "chunk": return "retrieve_chunks"
+    return "generate_answer"
+
+def route_evaluate_summary(state: GraphState):
+    action = state.get("current_action", "answer")
+    if action == "retry_summary": return "retrieve_summary"
+    if action == "chunk": return "retrieve_chunks"
+    return "generate_answer"
+
+def route_evaluate_chunks(state: GraphState):
+    action = state.get("current_action", "answer")
+    if action == "retry_chunk": return "retrieve_chunks"
+    return "generate_answer"
+
+def create_chat_agent():
+    workflow = StateGraph(GraphState)
+    
+    workflow.add_node("analyze_query", analyze_query_node)
+    workflow.add_node("retrieve_summary", retrieve_summary_node)
+    workflow.add_node("evaluate_summary", evaluate_summary_node)
+    workflow.add_node("retrieve_chunks", retrieve_chunks_node)
+    workflow.add_node("evaluate_chunks", evaluate_chunks_node)
+    workflow.add_node("generate_answer", generate_answer_node)
+    
+    workflow.set_entry_point("analyze_query")
+    
+    workflow.add_conditional_edges("analyze_query", route_initial, ["retrieve_summary", "retrieve_chunks", "generate_answer"])
+    
+    workflow.add_edge("retrieve_summary", "evaluate_summary")
+    workflow.add_conditional_edges("evaluate_summary", route_evaluate_summary, ["retrieve_summary", "retrieve_chunks", "generate_answer"])
+    
+    workflow.add_edge("retrieve_chunks", "evaluate_chunks")
+    workflow.add_conditional_edges("evaluate_chunks", route_evaluate_chunks, ["retrieve_chunks", "generate_answer"])
+    
+    workflow.add_edge("generate_answer", END)
+    
+    return workflow.compile()
 
 
 if __name__ == "__main__": 
     # Example chat history
     chat_history = [
-        {"role": "user", "content": "Facility Risk Profile Creation"}
+        {"role": "user", "content": "Tell me about ALM"}
     ]
     agent = create_chat_agent()
     response = agent.invoke({
@@ -256,9 +349,23 @@ if __name__ == "__main__":
             break
         
     if len(docs)>0:
-        id,doc_text,doc_name,doc_sharepoint_url,score = docs[0]
+        doc_entry = docs[0]
+        if isinstance(doc_entry, dict):
+            doc_name = doc_entry.get("document_name", "")
+            doc_sharepoint_url = doc_entry.get("document_sharepoint_url", "")
+            page_num = doc_entry.get("page_number", "")
+            result["page_number"] = page_num
+        elif len(doc_entry) == 5:
+            id,doc_text,doc_name,doc_sharepoint_url,score = doc_entry
+        elif len(doc_entry) == 4:
+            id,doc_text,doc_name,score = doc_entry
+            doc_sharepoint_url = ""
+        else:
+            doc_name = ""
+            doc_sharepoint_url = ""
+            
         result["document_name"] = doc_name
-        result["document_sharepoint_url"] = doc_sharepoint_url 
+        result["document_sharepoint_url"] = doc_sharepoint_url
     print("-------")
     print(result)
     # print(final_text)

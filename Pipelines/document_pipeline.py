@@ -137,6 +137,11 @@ def get_all_items(drive_id, folder="root", path=""):
                 get_all_items(drive_id,  f"items/{item['id']}", current_path)
             else:
                 print(f"[FILE] {current_path}")
+
+                # ✅ ONLY process files inside WorkBench folder
+                if "AML" not in current_path:
+                    continue
+
                 # Cross check if file already exists to avoid duplicates
                 if os.path.exists(os.path.join(DOWNLOAD_FOLDER, item["name"])):
                     print(f"[WARN] Skipping {item['name']} (already exists)")
