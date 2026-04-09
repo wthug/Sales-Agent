@@ -47,19 +47,20 @@ export default function Chat() {
       });
       if (res.ok) {
         const data = await res.json();
-
         const formatted = data.map(msg => {
+          
           let parsedSources = [];
           if (typeof msg.sources === 'string') {
             try { parsedSources = JSON.parse(msg.sources); } catch (e) { }
           } else if (Array.isArray(msg.sources)) {
             parsedSources = msg.sources;
           }
-
+          
           let sourceMap = new Map();
           let docToLink = new Map();
 
-          function addPage(key, value) {
+          function add_page(key, value) {
+            // console.log(key, value);
             if (!key || !value) return;
             if (sourceMap.has(key)) {
               if (!sourceMap.get(key).includes(value)) {
@@ -78,21 +79,32 @@ export default function Chat() {
             docToLink.set(key, value);
 
           }
+
+
           parsedSources?.forEach(doc => {
-            addPage(doc.document_name, doc.page_number);
+            add_page(doc.document_name, doc.page_number);
             link_doc_url(doc.document_name, doc.document_sharepoint_url);
           });
+
+          // console.log(sourceMap);
+          // console.log(docToLink);
+
+          let resources = Array.from(docToLink.keys()).map(s => (
+            {
+              name: s || 'Unknown',
+              url: docToLink.get(s) || null,
+              page_numbers: sourceMap.get(s) || null,
+            }
+          ));
+
+          // console.log(resources);
 
           return {
             id: msg.message_id,
             role: msg.role,
             text: msg.content,
             time: msg.time_str || (msg.created_at ? new Date(msg.created_at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown Time'),
-            sources: Array.from(sourceMap.keys()).map(s => ({
-              name: s || 'Unknown',
-              url: docToLink.get(s) || null,
-              page_numbers: sourceMap.get(s) || null,
-            }))
+            sources: resources
           };
         });
         setMessages(formatted);
@@ -216,6 +228,7 @@ export default function Chat() {
 
       const sourceMap = new Map();
       const docToLink = new Map();
+
       function addPage(key, value) {
         if (!key || !value) return;
         if (sourceMap.has(key)) {
@@ -234,7 +247,15 @@ export default function Chat() {
         docToLink.set(key, value);
 
       }
-      data.sources?.forEach(doc => {
+      
+      let parsedSources = [];
+      if (typeof data.sources === 'string') {
+        try { parsedSources = JSON.parse(data.sources); } catch (e) { }
+      } else if (Array.isArray(data.sources)) {
+        parsedSources = data.sources;
+      }
+
+      parsedSources?.forEach(doc => {
         addPage(doc.document_name, doc.page_number);
         link_doc_url(doc.document_name, doc.document_sharepoint_url);
       });
@@ -244,7 +265,7 @@ export default function Chat() {
         role: 'assistant',
         text: data.content || data.error || 'Sorry, no response generated.',
         time: data.time_str || new Date().toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-        sources: Array.from(sourceMap.keys()).map(s => ({
+        sources: Array.from(docToLink.keys()).map(s => ({
           name: s || 'Unknown',
           url: docToLink.get(s) || null,
           page_numbers: sourceMap.get(s) || null,
@@ -345,7 +366,9 @@ export default function Chat() {
         <div className="flex-1 overflow-y-auto bg-gray-50/50 p-6 scroll-smooth">
           <div className="mx-auto max-w-3xl space-y-6">
             {messages.map((msg) => (
+              
               <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                
                 <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${msg.role === 'user' ? 'bg-gray-900 text-white' : 'bg-blue-600 text-white'}`}>
                   {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                 </div>
@@ -370,8 +393,6 @@ export default function Chat() {
                               ) : (
                                 src.name
                               )}
-                              {console.log(src.name + "->")}
-                              {console.log(src.page_numbers)}
                               {src.page_numbers && src.page_numbers.length > 0 && `......Page numbers - ${src.page_numbers}`}
                             </li>
                           ))}

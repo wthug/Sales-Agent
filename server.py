@@ -225,7 +225,7 @@ def chat_endpoint():
         conn = Database.get_connection()
         if conn:
             try:
-                assistant_time = datetime.datetime.now().strftime("%b %d, %Y, %I:%M %p")
+                assistant_time = user_time
                 with conn.cursor() as cur:
                     cur.execute("UPDATE messages SET content = %s, time_str = %s WHERE message_id = %s RETURNING sources", (result["content"], assistant_time, assistant_id))
                     sources = cur.fetchone()[0]
