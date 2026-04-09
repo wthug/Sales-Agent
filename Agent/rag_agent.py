@@ -3,11 +3,18 @@ import sys
 
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent 
+from pgvector.psycopg2 import register_vector
+import psycopg2
 
 import os
 from dotenv import load_dotenv
 load_dotenv()
 open_api_key = os.getenv("OPENAI_API_KEY")
+db_name = os.getenv("db_name")
+user = os.getenv("user")
+postgresql_password = os.getenv("postgresql_password")
+host = os.getenv("host")
+port = os.getenv("port")
 
 # -------------------------
 # Tools
@@ -47,71 +54,77 @@ from typing import List, Tuple
 from langsmith import traceable
 
 @tool(
-    response_format="content_and_artifact",
-    description="Retrieve relevant document summaries for a user query."
+    description="Retrieve relevant document summaries for a user query. You MUST pass the msg_id."
 )
 @traceable(run_type="tool", name="Search_Summary")
-def search_summary_tool(query: str):
-    content, docs = search_similar_summary(query)
+def search_summary_tool(query: str, msg_id: int = None):
+    if msg_id:
+        print("msg_id passed in summary search tool" , msg_id)
+    content , metadata = search_similar_summary(query)
     print("------ Retrieved Summary (CONTENT) ------")
-    print(content)
-    print("------ Retrieved Docs (ARTIFACT) ------")
-    print(docs)
-    # Optional: add source info for LLM clarity
-    source_info_list = []
-    for i, doc in enumerate(docs):
-        try:
-            if isinstance(doc, dict):
-                document_name = doc.get("document_name", "Unknown")
-                similarity = doc.get("similarity", 0),
-                document_sharepoint_url=doc.get("document_sharepoint_url","")
-            elif isinstance(doc, (list, tuple)) and len(doc) >= 5:
-                _, _, document_name, similarity,document_sharepoint_url = doc
-            else:
-                continue
-            source_info_list.append(
-                f"[Source {i+1}: {document_name}]"
-            )
-        except Exception as e:
-            print("Error formatting doc:", e)
-    if source_info_list:
-        content = content + "\n\nSources:\n" + "\n".join(source_info_list)
-    return content, docs
+    # print(content)
+
+    print("metadata:\n ", metadata)
+
+    try:
+        import json
+        conn2 = psycopg2.connect(
+            dbname=db_name,
+            user=user,
+            password=postgresql_password,
+            host=host,
+            port=port
+        )
+        cur2 = conn2.cursor()
+        cur2.execute("UPDATE messages SET sources = COALESCE(sources, '[]'::jsonb) || %s::jsonb WHERE message_id = %s", (json.dumps(metadata), msg_id))
+        conn2.commit()
+        cur2.close()
+        conn2.close()
+        print("Updated messages with sources of summaries")
+
+    except Exception as e:
+        import traceback
+        print("Error updating messages table with sources in summary DB:")
+        traceback.print_exc()
+
+    return content
 
 
 @tool(
-    response_format="content_and_artifact",
-    description="Use this tool to retrieve the most relevant document chunks for a user query. You may optionally pass a doc_name to narrow the search from the database and get a more accurate response. Returns formatted source information for display and raw chunk data for further processing"
+    description="Use this tool to retrieve the most relevant document chunks for a user query. You may optionally pass a doc_name to narrow the search from the database and get a more accurate response. You MUST pass the msg_id."
 )
 @traceable(run_type="tool", name="Search_Chunk")
-def search_chunk_tool(query: str, doc_name: str = None) -> Tuple[str, List[Document]]:
-    content, docs = search_similar_chunk(query, doc_name=doc_name)
-    print("\n------ Retrieved Summary (CONTENT) ------\n")
-    print(content)
-    print("\n------ Retrieved Docs (ARTIFACT) ------\n")
-    # print(docs)
-    # Optional: add source info for LLM clarity
-    source_info_list = []
-    for i, doc in enumerate(docs):
-        print(doc)
-        print("\n")
-        try:
-            if isinstance(doc, dict):
-                document_name = doc.get("document_name", "Unknown")
-                similarity = doc.get("similarity", 0)
-                document_sharepoint_url=doc.get("document_sharepoint_url","")
-            elif isinstance(doc, (list, tuple)) and len(doc) >= 5:
-                _, _, document_name, similarity,document_sharepoint_url = doc
-            else:
-                continue
-            source_info_list.append(
-                f"[Source {i+1}: {document_name}]"
-            )
-        except Exception as e:
-            print("Error formatting doc:", e)
-    if source_info_list:
-        content = content + "\n\nSources:\n" + "\n".join(source_info_list)
-    return content, docs
+def search_chunk_tool(query: str, msg_id: int, doc_name: str = None) -> str:
+
+    if msg_id:
+        print("msg_id passed in chunk search tool",msg_id)
+
+    content , metadata = search_similar_chunk(query, doc_name=doc_name)
+    print("\n------ Retrieved Chunks (CONTENT) ------\n")
+    # print(content)
+    print("Metadata :\n",metadata)
+
+    try:
+        import json
+        conn2 = psycopg2.connect(
+            dbname=db_name,
+            user=user,
+            password=postgresql_password,
+            host=host,
+            port=port
+        )
+        cur2 = conn2.cursor()
+        cur2.execute("UPDATE messages SET sources = COALESCE(sources, '[]'::jsonb) || %s::jsonb WHERE message_id = %s", (json.dumps(metadata), msg_id))
+        conn2.commit()
+        cur2.close()
+        conn2.close()
+        print("Updated messages with sources of chunks")
+    except Exception as e:
+        import traceback
+        print("Error updating messages table with sources in chunk DB:")
+        traceback.print_exc()
+
+    return content
 
 
 
@@ -139,7 +152,7 @@ def create_chat_agent():
     system_prompt = """
 You are an intelligent Sales Agent assistant designed to answer user queries using proposal documents.
 
-You will receive chat_history containing the full conversation.
+You will receive chat_history containing the full conversation and message_id where your final response to query will be saved.
 Your primary goal is to accurately answer the LAST user query using the available tools.
 
 ----------------------------------------
@@ -185,6 +198,7 @@ Step 2: Identify document
 
 Step 3: Retrieve details
 - Use search_chunk_tool to fetch precise information from the selected document
+- Do not forget to pass message_id to tools as well to save the sources
 - Focus on relevant sections only
 
 Step 4: Generate final answer
@@ -205,7 +219,7 @@ Step 4: Generate final answer
 
 ----------------------------------------
  COMMON MISTAKES TO AVOID
---------------------------------------  --
+----------------------------------------
 
 - Information Bloat: Giving extra information that wasn't asked for just because it was in the retrieved data.
 - Vague Summarization: Failing to provide a short, precise answer when a "brief" response is requested.

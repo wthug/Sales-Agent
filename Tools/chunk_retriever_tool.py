@@ -34,7 +34,7 @@ def get_embeddings(input_text: str) -> list:
 
 
 @traceable(run_type="retriever", name="Vector_DB_Search")
-def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> list:
+def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> str:
     """Return the most similar chunks to the user input based on cosine similarity."""
     try:
         # Connection Configuration
@@ -65,7 +65,7 @@ def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> list
             # """
             if doc_name:
                 search_query = """
-                    SELECT document_id, chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
+                    SELECT document_id,page_number, chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
                     FROM all_document_chunks
                     WHERE document_name = %s
                     ORDER BY embedding <=> %s::vector
@@ -74,7 +74,7 @@ def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> list
                 cur.execute(search_query, (embedding_vector, doc_name, embedding_vector, top_k))
             else:
                 search_query = """
-                    SELECT document_id, chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
+                    SELECT document_id,page_number, chunk_text, document_name, 1 - (embedding <=> %s::vector) AS similarity, document_sharepoint_url
                     FROM all_document_chunks
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s;
@@ -86,23 +86,44 @@ def search_similar_chunk(user_input: str, doc_name: str = None, top_k=5) -> list
             formatted_content = ""
             documents = []
             for row in results:
-                document_id, chunk_text, document_name, similarity,document_sharepoint_url = row
+                document_id,page_number, chunk_text, document_name, similarity,document_sharepoint_url = row
                 formatted_content += f"""
                 Document: {document_name}
                 Similarity Score: {similarity:.2f}
+                Page Number: {page_number}
                 Chunk:
                 {chunk_text}
                 ----------------------
                 """
                 documents.append({
-                    "document_id": document_id,
+                    "document_id": str(document_id),
+                    "page_number": page_number,
                     "document_name": document_name,
                     "similarity": similarity,
                     "document_sharepoint_url":document_sharepoint_url
                 })
                 formatted_content.strip(),   
                 documents                  
-            return (formatted_content.strip(),documents)
+            
+            # if msg_id:
+            #     try:
+            #         import json
+            #         conn2 = psycopg2.connect(
+            #             dbname=db_name,
+            #             user=user,
+            #             password=postgresql_password,
+            #             host=host,
+            #             port=port
+            #         )
+            #         cur2 = conn2.cursor()
+            #         cur2.execute("UPDATE messages SET sources = COALESCE(sources, '[]'::jsonb) || %s::jsonb WHERE message_id = %s", (json.dumps(documents), msg_id))
+            #         conn2.commit()
+            #         cur2.close()
+            #         conn2.close()
+            #     except Exception as e:
+            #         print("Error updating messages table with sources:", e)
+
+            return formatted_content.strip() , documents
             # return {
             #     "output": results
             # }

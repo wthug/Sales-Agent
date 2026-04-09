@@ -80,7 +80,7 @@ class Database:
                 cur.execute('''
                     CREATE TABLE IF NOT EXISTS messages (
                         message_id SERIAL PRIMARY KEY,
-                        conversation_id INT REFERENCES conversations(id) ON DELETE CASCADE,
+                        conversation_id INT REFERENCES conversations(conversation_id) ON DELETE CASCADE,
                         role VARCHAR(50) NOT NULL,
                         content TEXT NOT NULL,
                         time_str VARCHAR(255),

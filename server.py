@@ -124,8 +124,10 @@ def get_conversations():
     if not conn: return jsonify({"error": "Database connection failed"}), 500
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id, title, created_at, updated_at FROM conversations WHERE user_id = %s ORDER BY updated_at DESC", (request.user_id,))
-            return jsonify(cur.fetchall()), 200
+            cur.execute("SELECT conversation_id, title, created_at, updated_at FROM conversations WHERE user_id = %s ORDER BY updated_at DESC", (request.user_id,))
+            res = jsonify(cur.fetchall())
+            # print(res)
+            return res, 200
     except Exception as e: return jsonify({"error": str(e)}), 500
     finally: Database.put_connection(conn)
 
@@ -139,7 +141,7 @@ def create_conversation():
     if not conn: return jsonify({"error": "Database connection failed"}), 500
     try:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO conversations (user_id, title) VALUES (%s, %s) RETURNING id", (request.user_id, title))
+            cur.execute("INSERT INTO conversations (user_id, title) VALUES (%s, %s) RETURNING conversation_id", (request.user_id, title))
             conv_id = cur.fetchone()[0]
         conn.commit()
         return jsonify({"id": conv_id, "title": title}), 201
@@ -156,9 +158,9 @@ def get_messages(col_id):
     if not conn: return jsonify({"error": "Database connection failed"}), 500
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id FROM conversations WHERE id = %s AND user_id = %s", (col_id, request.user_id))
+            cur.execute("SELECT conversation_id FROM conversations WHERE conversation_id = %s AND user_id = %s", (col_id, request.user_id))
             if not cur.fetchone(): return jsonify({"error": "Conversation not found"}), 404
-            cur.execute("SELECT id, role, content, sources, time_str, created_at FROM messages WHERE conversation_id = %s ORDER BY id ASC", (col_id,))
+            cur.execute("SELECT message_id, role, content, sources, time_str, created_at FROM messages WHERE conversation_id = %s ORDER BY message_id ASC", (col_id,))
             return jsonify(cur.fetchall()), 200
     except Exception as e: return jsonify({"error": str(e)}), 500
     finally: Database.put_connection(conn)
@@ -171,7 +173,7 @@ def chat_endpoint():
         return jsonify({"error": "Invalid or missing JSON body"}), 400
     messages = data.get("messages")
     conversation_id = data.get("conversation_id")
-    print(messages)
+    # print(messages)
     if not messages or not isinstance(messages, list):
         return jsonify({"error": "messages must be a list"}), 400
     try:
@@ -184,10 +186,14 @@ def chat_endpoint():
                 with conn.cursor() as cur:
                     if not conversation_id:
                         title = (user_msg[:30] + '...') if len(user_msg) > 30 else (user_msg or "New Conversation")
-                        cur.execute("INSERT INTO conversations (user_id, title) VALUES (%s, %s) RETURNING id", (request.user_id, title))
+                        cur.execute("INSERT INTO conversations (user_id, title) VALUES (%s, %s) RETURNING conversation_id", (request.user_id, title))
                         conversation_id = cur.fetchone()[0]
                     cur.execute("INSERT INTO messages (conversation_id, role, content, time_str) VALUES (%s, %s, %s, %s)", (conversation_id, "user", user_msg, user_time))
-                    cur.execute("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", (conversation_id,))
+                    
+                    cur.execute("INSERT INTO messages (conversation_id, role,content, time_str) VALUES (%s, %s, %s, %s) RETURNING message_id", (conversation_id, "assistant", "Thinking...",user_time))
+                    assistant_id = cur.fetchone()[0]
+                    
+                    cur.execute("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE conversation_id = %s", (conversation_id,))
                 conn.commit()
             except Exception as e:
                 print("DB Error logging user msg:", e)
@@ -195,61 +201,25 @@ def chat_endpoint():
             finally:
                 Database.put_connection(conn)
 
+        # Inject instruction so the LLM agent knows its message_id context dynamic variable
+        if messages:
+            messages[-1]["content"] += f"\n\n[SYSTEM INSTRUCTION: Your current message_id is {assistant_id}. You MUST pass msg_id={assistant_id} to any tool you call.]"
+
         response = agent.invoke({
-            "messages": messages
+            "messages": messages,
+            "message_id" : assistant_id
         })
-        print(response)
+        # print(response)
         # ✅ Final LLM response
         final_text = response["messages"][-1].content
+
         # ✅ Initialize result in NEW FORMAT
         result = {
-            "content": final_text,
-            "artifact": []
+            "content": final_text
         }
-        docs = []
-        # 🔍 Extract tool artifact (latest tool call)
-        for msg in reversed(response["messages"]):
-            if msg.type == "tool" and hasattr(msg, "artifact") and msg.artifact:
-                docs = msg.artifact
-                break
-        # ✅ Handle BOTH formats (old tuple + new dict)
-        my_set = set()
-        for doc in docs:
-            try:
-                # 🔹 NEW FORMAT (dict)
-                if isinstance(doc, dict):
-                    doc_name = doc.get("document_name")
-
-                    if doc_name in my_set:
-                        continue
-                    my_set.add(doc_name)
-
-                    result["artifact"].append({
-                        "document_id": str(doc.get("document_id")) if doc.get("document_id") else "",
-                        "document_name": doc.get("document_name"),
-                        "similarity": doc.get("similarity"),
-                        "document_sharepoint_url":doc.get("document_sharepoint_url")
-                    })
-                # 🔹 OLD FORMAT (tuple)
-                elif isinstance(doc, (list, tuple)) and len(doc) >= 5:
-                    doc_id, doc_text, doc_name, score,document_sharepoint_url = doc
-
-                    if doc_name in my_set:
-                        continue
-                    
-                    my_set.add(doc_name)
-                    
-
-                    result["artifact"].append({
-                        "document_id": str(doc_id) if doc_id else "",
-                        "document_name": doc_name,
-                        "similarity": score,
-                        "document_sharepoint_url": document_sharepoint_url
-                    })
-            except Exception as e:
-                print("Error processing doc:", e)
         
-        print("FINAL RESPONSE:", result)
+        # print("FINAL RESPONSE:", result)
+        print("\n\n------returning final response-----\n")
 
         # Update Chat History
         conn = Database.get_connection()
@@ -257,11 +227,13 @@ def chat_endpoint():
             try:
                 assistant_time = datetime.datetime.now().strftime("%b %d, %Y, %I:%M %p")
                 with conn.cursor() as cur:
-                    cur.execute("INSERT INTO messages (conversation_id, role, content, sources, time_str) VALUES (%s, %s, %s, %s, %s)", (conversation_id, "assistant", result["content"], json.dumps(result["artifact"]), assistant_time))
-                    cur.execute("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", (conversation_id,))
+                    cur.execute("UPDATE messages SET content = %s, time_str = %s WHERE message_id = %s RETURNING sources", (result["content"], assistant_time, assistant_id))
+                    sources = cur.fetchone()[0]
+                    cur.execute("UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE conversation_id = %s", (conversation_id,))
                 conn.commit()
                 result["conversation_id"] = conversation_id
                 result["time_str"] = assistant_time
+                result["sources"] = sources
             except Exception as db_e:
                 print("DB Error logging assistant msg:", db_e)
                 conn.rollback()

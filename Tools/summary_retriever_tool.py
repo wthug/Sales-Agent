@@ -34,7 +34,7 @@ def get_embeddings(input_text: str) -> list:
 
 
 @traceable(run_type="retriever", name="Vector_DB_Search")
-def search_similar_summary( input_text: str, top_k=4) -> list:
+def search_similar_summary( input_text: str, top_k=2) -> str:
     """Return the most similar summary to the input text based on cosine similarity."""
     try:
         # Connection Configuration
@@ -87,7 +87,7 @@ def search_similar_summary( input_text: str, top_k=4) -> list:
                 ----------------------
                 """
                 documents.append({
-                    "document_id": document_id,
+                    "document_id": str(document_id),
                     "document_name": document_name,
                     "similarity": similarity,
                     "document_sharepoint_url":document_sharepoint_url
@@ -95,7 +95,26 @@ def search_similar_summary( input_text: str, top_k=4) -> list:
 
                 formatted_content.strip(),   
                 documents                  
-            return (formatted_content.strip(),documents)
+
+            # if msg_id:
+            #     try:
+            #         import json
+            #         conn2 = psycopg2.connect(
+            #             dbname=db_name,
+            #             user=user,
+            #             password=postgresql_password,
+            #             host=host,
+            #             port=port
+            #         )
+            #         cur2 = conn2.cursor()
+            #         cur2.execute("UPDATE messages SET sources = COALESCE(sources, '[]'::jsonb) || %s::jsonb WHERE message_id = %s", (json.dumps(documents), msg_id))
+            #         conn2.commit()
+            #         cur2.close()
+            #         conn2.close()
+            #     except Exception as e:
+            #         print("Error updating messages table with sources:", e)
+
+            return formatted_content.strip() , documents
         
         except Exception as e:
             cur.close()

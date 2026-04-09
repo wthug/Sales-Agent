@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 
 export default function Chat() {
   const [messages, setMessages] = useState([
-    { id: 1, role: 'assistant', text: 'Hello! I am your AI assistant. How can I help you today?', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }
+    { id: 1, role: 'assistant', text: 'Hello! I am your AI assistant. How can I help you today?', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
   ]);
   const [input, setInput] = useState('');
   const navigate = useNavigate();
@@ -30,6 +30,7 @@ export default function Chat() {
       });
       if (res.ok) {
         const data = await res.json();
+        // console  .log(data)
         setConversations(data);
       }
     } catch (e) { console.error(e); }
@@ -46,22 +47,51 @@ export default function Chat() {
       });
       if (res.ok) {
         const data = await res.json();
+
         const formatted = data.map(msg => {
           let parsedSources = [];
           if (typeof msg.sources === 'string') {
-            try { parsedSources = JSON.parse(msg.sources); } catch (e) {}
+            try { parsedSources = JSON.parse(msg.sources); } catch (e) { }
           } else if (Array.isArray(msg.sources)) {
             parsedSources = msg.sources;
           }
-          
+
+          let sourceMap = new Map();
+          let docToLink = new Map();
+
+          function addPage(key, value) {
+            if (!key || !value) return;
+            if (sourceMap.has(key)) {
+              if (!sourceMap.get(key).includes(value)) {
+                sourceMap.get(key).push(value);
+              }
+            } else {
+              sourceMap.set(key, [value]);
+            }
+
+          }
+          function link_doc_url(key, value) {
+            if (!key || !value) return;
+            if (docToLink.has(key)) {
+              return;
+            }
+            docToLink.set(key, value);
+
+          }
+          parsedSources?.forEach(doc => {
+            addPage(doc.document_name, doc.page_number);
+            link_doc_url(doc.document_name, doc.document_sharepoint_url);
+          });
+
           return {
-            id: msg.id,
+            id: msg.message_id,
             role: msg.role,
             text: msg.content,
-            time: msg.time_str || (msg.created_at ? new Date(msg.created_at).toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'}) : 'Unknown Time'),
-            sources: parsedSources.map(s => ({
-              name: s.document_name || s.name || 'Unknown',
-              url: s.document_sharepoint_url || s.url || null
+            time: msg.time_str || (msg.created_at ? new Date(msg.created_at).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown Time'),
+            sources: Array.from(sourceMap.keys()).map(s => ({
+              name: s || 'Unknown',
+              url: docToLink.get(s) || null,
+              page_numbers: sourceMap.get(s) || null,
             }))
           };
         });
@@ -75,7 +105,7 @@ export default function Chat() {
   const startNewChat = () => {
     setCurrentConversationId(null);
     draftIdRef.current = Date.now();
-    setMessages([{ id: Date.now(), role: 'assistant', text: 'Hello! I am your AI assistant. How can I help you today?', time: new Date().toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'}) }]);
+    setMessages([{ id: Date.now(), role: 'assistant', text: 'Hello! I am your AI assistant. How can I help you today?', time: new Date().toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }]);
   };
 
   // Check token on mount
@@ -131,9 +161,9 @@ export default function Chat() {
       id: Date.now(),
       role: 'user',
       text: input,
-      time: new Date().toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'})
+      time: new Date().toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
     };
-    
+
     const updatedMessages = [...messages, newUserMsg];
     setMessages(updatedMessages);
     setInput('');
@@ -142,23 +172,23 @@ export default function Chat() {
     try {
       let activeConvId = currentConversationId;
       if (!activeConvId) {
-         const userQuery = newUserMsg.text.trim();
-         const titleStr = userQuery.length > 30 ? userQuery.substring(0, 30) + '...' : userQuery;
-         const convRes = await fetch('/api/conversations', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ title: titleStr })
-         });
-         
-         if (convRes.ok) {
-            const convData = await convRes.json();
-            activeConvId = convData.id;
-            setCurrentConversationId(activeConvId);
-            fetchConversations(token);
-         }
+        const userQuery = newUserMsg.text.trim();
+        const titleStr = userQuery.length > 30 ? userQuery.substring(0, 30) + '...' : userQuery;
+        const convRes = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ title: titleStr })
+        });
+
+        if (convRes.ok) {
+          const convData = await convRes.json();
+          activeConvId = convData.id;
+          setCurrentConversationId(activeConvId);
+          fetchConversations(token);
+        }
       }
 
       const apiMessages = updatedMessages.map(m => ({
@@ -181,26 +211,50 @@ export default function Chat() {
         navigate('/login');
         return;
       }
-      
+
       const data = await res.json();
-      
-      const sources = data.artifact?.map(doc => ({
-        name: doc.document_name || 'Unknown',
-        url: doc.document_sharepoint_url || null
-      })) || [];
+
+      const sourceMap = new Map();
+      const docToLink = new Map();
+      function addPage(key, value) {
+        if (!key || !value) return;
+        if (sourceMap.has(key)) {
+          if (!sourceMap.get(key).includes(value)) {
+            sourceMap.get(key).push(value);
+          }
+        } else {
+          sourceMap.set(key, [value]);
+        }
+      }
+      function link_doc_url(key, value) {
+        if (!key || !value) return;
+        if (docToLink.has(key)) {
+          return;
+        }
+        docToLink.set(key, value);
+
+      }
+      data.sources?.forEach(doc => {
+        addPage(doc.document_name, doc.page_number);
+        link_doc_url(doc.document_name, doc.document_sharepoint_url);
+      });
 
       const newAiMsg = {
         id: Date.now() + 1,
         role: 'assistant',
         text: data.content || data.error || 'Sorry, no response generated.',
-        time: data.time_str || new Date().toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'}),
-        sources: sources
+        time: data.time_str || new Date().toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+        sources: Array.from(sourceMap.keys()).map(s => ({
+          name: s || 'Unknown',
+          url: docToLink.get(s) || null,
+          page_numbers: sourceMap.get(s) || null,
+        }))
       };
-      
+
       const originalDraftId = draftIdRef.current;
       const targetConvId = activeConvId;
 
-      const isStillViewingTarget = targetConvId 
+      const isStillViewingTarget = targetConvId
         ? (String(activeConversationRef.current) === String(targetConvId))
         : (activeConversationRef.current === null && draftIdRef.current === originalDraftId);
 
@@ -218,7 +272,7 @@ export default function Chat() {
           id: Date.now() + 1,
           role: 'assistant',
           text: 'Sorry, I encountered an error connecting to the server.',
-          time: new Date().toLocaleString([], {month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute:'2-digit'})
+          time: new Date().toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
         };
         setMessages(prev => [...prev, errorMsg]);
       }
@@ -237,24 +291,24 @@ export default function Chat() {
             <span>AI Assistant</span>
           </div>
         </div>
-        
+
         <div className="px-4 py-3 border-b border-gray-100 shrink-0">
           <button onClick={startNewChat} className="w-full flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors">
             <MessageSquare className="h-4 w-4" />
             New Chat
           </button>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto py-4">
           <div className="px-4 text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Recent Chats</div>
           <div className="space-y-1 px-3">
             {conversations.map((conv) => (
-              <button 
-                key={conv.id} 
-                onClick={() => selectConversation(conv.id)}
-                className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all focus:outline-none ${currentConversationId === conv.id ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-white hover:shadow-sm'}`}
+              <button
+                key={conv.conversation_id}
+                onClick={() => selectConversation(conv.conversation_id)}
+                className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all focus:outline-none ${currentConversationId === conv.conversation_id ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-white hover:shadow-sm'}`}
               >
-                <MessageSquare className={`h-4 w-4 shrink-0 ${currentConversationId === conv.id ? 'text-blue-500' : 'text-gray-400 group-hover:text-blue-500'}`} />
+                <MessageSquare className={`h-4 w-4 shrink-0 ${currentConversationId === conv.conversation_id ? 'text-blue-500' : 'text-gray-400 group-hover:text-blue-500'}`} />
                 <div className="truncate text-left font-medium">{conv.title || 'Conversation'}</div>
               </button>
             ))}
@@ -267,7 +321,7 @@ export default function Chat() {
               {localStorage.getItem('username')?.substring(0, 2) || 'U'}
             </div>
             <div className="flex-1 overflow-hidden">
-              <div className="truncate text-sm font-medium text-gray-900">{localStorage.getItem('username') || 'User'}</div>  
+              <div className="truncate text-sm font-medium text-gray-900">{localStorage.getItem('username') || 'User'}</div>
             </div>
             <button onClick={() => {
               localStorage.removeItem('token');
@@ -284,7 +338,7 @@ export default function Chat() {
       <div className="flex flex-1 flex-col">
         {/* Mobile Header overlay for smaller screens, simple nav for desktop */}
         <div className="flex h-16 items-center border-b border-gray-100 bg-white px-6 shadow-sm z-10">
-           <h1 className="text-lg font-medium text-gray-900">Current Conversation</h1>
+          <h1 className="text-lg font-medium text-gray-900">Current Conversation</h1>
         </div>
 
         {/* Messages */}
@@ -296,11 +350,10 @@ export default function Chat() {
                   {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                 </div>
                 <div className={`flex max-w-[80%] flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className={`rounded-2xl px-5 py-2.5 text-[15px] leading-relaxed shadow-sm ${
-                    msg.role === 'user' 
-                      ? 'bg-gray-900 text-white rounded-tr-sm' 
-                      : 'bg-white text-gray-800 ring-1 ring-gray-100 rounded-tl-sm'
-                  }`}>
+                  <div className={`rounded-2xl px-5 py-2.5 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user'
+                    ? 'bg-gray-900 text-white rounded-tr-sm'
+                    : 'bg-white text-gray-800 ring-1 ring-gray-100 rounded-tl-sm'
+                    }`}>
                     <div className="whitespace-pre-wrap">{msg.text}</div>
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="mt-3 border-t border-gray-100 pt-3">
@@ -317,6 +370,9 @@ export default function Chat() {
                               ) : (
                                 src.name
                               )}
+                              {console.log(src.name + "->")}
+                              {console.log(src.page_numbers)}
+                              {src.page_numbers && src.page_numbers.length > 0 && `......Page numbers - ${src.page_numbers}`}
                             </li>
                           ))}
                         </ul>
@@ -359,7 +415,7 @@ export default function Chat() {
                 )}
               </button>
             </form>
-            
+
           </div>
         </div>
       </div>

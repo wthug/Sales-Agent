@@ -123,21 +123,23 @@ def storing_chunks(chunks: list , document_id , doc: str, sharepoint_url: str) -
         errors = []
         print(len(chunks))
         number=0
-        for index, chunk in enumerate(chunks):
+        for index, chunk_data in enumerate(chunks):
             try:
                 number+=1
                 print(f"Chunk No:{number}")
-                chunk_embeddings = get_embeddings(chunk)
+                chunk_text = chunk_data.get("text", "")
+                page_number = chunk_data.get("page")
+                chunk_embeddings = get_embeddings(chunk_text)
                 if not chunk_embeddings:
                     errors.append({"error" : f"Failed to generate embeddings for chunk {index + 1}."})
                     continue
                 store_query = """
-                    INSERT INTO all_document_chunks ( document_id, chunk_index , chunk_text , embedding , document_name , document_sharepoint_url )  
-                    VALUES ( %s, %s , %s, %s , %s , %s )
+                    INSERT INTO all_document_chunks ( document_id, chunk_index, page_number, chunk_text , embedding , document_name , document_sharepoint_url )  
+                    VALUES ( %s, %s , %s, %s , %s , %s, %s )
                 """
                 cur.execute(
                     store_query,
-                    ( document_id, index, chunk, chunk_embeddings, doc, sharepoint_url)
+                    ( document_id, index, page_number, chunk_text, chunk_embeddings, doc, sharepoint_url)
                 )
                 conn.commit()
             except Exception as e:
@@ -281,9 +283,10 @@ def process_single_document(doc_tuple):
             for section in sections:
                 pre_chunks = text_splitter.split_text(section['content'])
                 for chunk in pre_chunks:
-                    chunks.append(f"{section['heading']}:\n\n{chunk}")
+                    chunks.append({"text": f"{section['heading']}:\n\n{chunk}", "page": None})
                 table_chunks = prepare_llm_chunks(section['tables'], section['heading'])
-                chunks.extend(table_chunks)
+                for tc in table_chunks:
+                    chunks.append({"text": tc, "page": None})
                 
 
 
@@ -293,7 +296,10 @@ def process_single_document(doc_tuple):
         pre_chunks = text_splitter.split_documents(loaded_doc)
         chunks = []
         for chunk in pre_chunks:
-            chunks.append(chunk.page_content)
+            page_num = chunk.metadata.get('page')
+            if page_num is not None:
+                page_num += 1
+            chunks.append({"text": chunk.page_content, "page": page_num})
         print(f"{doc} split by splitter.......\n\n")
 
     # for chunk in chunks:
