@@ -1,9 +1,10 @@
 from langchain_community.document_loaders import DirectoryLoader, TextLoader ,PyPDFLoader , Docx2txtLoader, UnstructuredPowerPointLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAI, OpenAIEmbeddings
+from langchain_openai import OpenAI, OpenAIEmbeddings , ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langsmith import traceable
 from docx import Document
+from pydantic import BaseModel , Field
 
 
 from pgvector.psycopg2 import register_vector
@@ -31,40 +32,56 @@ conn = psycopg2.connect(
     port=port
 )
 
+class summary_state(BaseModel):
+    client_name: str = Field(description="The name of the organization")
+    solutions_provided: str = Field(description="Core services or products")
+    client_region: str = Field(description="Geographic location")
+    document_description: str = Field(description="A 300-400 word professional summary")
+
 @traceable(run_type="chain", name="Document_Summarizer")
 def generate_summary(input_text: str) -> str:
     try:
-        llm = OpenAI(
+        llm = ChatOpenAI(
             api_key=open_api_key,
-            model="gpt-4o-mini",
-            temperature=0.7
+            model="gpt-5-mini",
+            temperature=0
         )
+        structured_llm = llm.with_structured_output(summary_state)
+        # print("\n\n**")
         prompt = PromptTemplate(
         input_variables=["text"],
         template="""
             ### ROLE
-            You are a professional Summary Writing Agent. Your expertise lies in distilling complex information into concise, high-impact, and comprehensive summaries.
+            You are a Senior Business Analyst. Your task is to perform a deep-dive extraction and comprehensive summarization of the provided document text.
 
-            ### TASK
-            Read the provided input text and generate a professional summary of approximately 300 words. 
-            
-            ### CONSTRAINTS
-            1. DO NOT include any introductory remarks, conversational filler, or explanations (e.g., "Here is the summary" or "This code defines...").
-            2. DO NOT return code, function definitions, or markdown blocks.
-            3. The output must be ONLY the summary itself.
-            4. Return the result as a single, coherent paragraph that captures all key points and essential details.
+            ### STEP 1: PARAMETER EXTRACTION
+            Identify the Client Name, all solutions provided to customer with each components, and Client Region.
+
+            ### STEP 2: DOCUMENT DESCRIPTION (300-400 WORDS)
+            Write a detailed professional summary. This description must:
+            - Incorporate the Client Name, Solutions, and Region naturally.
+            - Describe core objectives and methodologies.
+            - Maintain a formal, analytical tone across 2-3 logical paragraphs.
+            - STRICTLY meet the length requirement of 300-400 words.
 
             ### INPUT TEXT
             {text}
-
-            ### SUMMARY
             """
         )
-        chain = prompt | llm
-        summary = chain.invoke({"text": input_text})
+        chain = prompt | structured_llm
+        response = chain.invoke({"text": input_text})
+
+        summary = ""
+
+        summary += f"Client Name: {response.client_name}\n"
+        summary += f"Solutions Provided: {response.solutions_provided}\n"
+        summary += f"Client Region: {response.client_region}\n"
+        summary += f"\nDocument Summary: \n{response.document_description}\n"
+        
         print(summary)
         return summary
     except Exception as e: 
+        print("Error generating summary:", {e})
         return ""
 
 

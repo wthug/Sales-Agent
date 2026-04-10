@@ -28,28 +28,6 @@ from langchain_core.tools import tool
 from langchain_core.documents import Document
 from typing import List, Tuple
 
-# @tool(
-#     response_format="content_and_artifact",
-#     description="Use this tool to retrieve relevant document summaries for a user query. Returns formatted source information for display and raw summary data for further processing"
-# )
-# def search_summary_tool(query:str) -> Tuple[str,List[Document]]:
-#     res = search_similar_summary(query)
-#     content = res.get("content", "")
-#     print(content)
-#     docs = res.get("artifact", [])
-#     print("------Seached Summary--------")
-#     print(docs)
-#     formatted_parts = []
-#     for i, doc in enumerate(docs):
-#         # document_id , summary_text , document_name , document_sharepoint_url , similarity = doc
-#         # source_info = f"[Source {i+1} ; Document Name {document_name} ; Document URL {document_sharepoint_url}]"
-#         # formatted_parts.append(source_info)
-#         document_id , summary_text , document_name , similarity = content
-#         source_info = f"[Source {i+1} ; Document Name {document_name} ; ]"
-#         formatted_parts.append(source_info)
-#     formatted_context = "\n\n---\n\n".join(formatted_parts)
-#     return formatted_context, docs
-
 
 from langsmith import traceable
 
@@ -126,6 +104,22 @@ def search_chunk_tool(query: str, msg_id: int, doc_name: str = None) -> str:
 
     return content
 
+@tool(
+    description="Use this tool to get the documents related to any particular topic. Tree based structure is given where domain wise folders are there and inside that there are subfolders and documents related to that subfolder"
+)
+def get_structure():
+    import os
+    print("\n\nFetching folder structure...\n\n")
+    tree_structure = "Below is tree structure of documents available in different domains, use this information to narrow down document to search through and query RAG tools accordingly\n\n"
+    
+    try:
+        with open("Pipelines/context_structure.txt", "r", encoding="utf-8") as f:
+            tree_structure += f.read()
+    except Exception as e:
+        print(f"Error reading context_structure.txt: {e}")
+        tree_structure += "Error: Could not load folder structure."
+
+    return tree_structure
 
 
 # -------------------------
@@ -145,6 +139,7 @@ def create_chat_agent():
     # llm = llm.with_structured_output(AgentResponse)
 
     tools = [
+        get_structure,
         search_summary_tool,
         search_chunk_tool
     ]
@@ -168,7 +163,13 @@ Your primary goal is to accurately answer the LAST user query using the availabl
  AVAILABLE TOOLS
 ----------------------------------------
 
-1. search_summary_tool
+1. get_structure
+- Use this tool to get list of documents related to any particular topic.
+- It returns a tree based folder structure where we get topic wise folders are organized with documents related to it.
+- Use this to know how to narrow down your retrieval by targeting specific folders.
+- Maximum 1 call
+
+2. search_summary_tool
 - Use this to identify the most relevant document(s)
 - Provides high-level summaries of documents
 - Helps when:
@@ -176,7 +177,7 @@ Your primary goal is to accurately answer the LAST user query using the availabl
   • No document is explicitly mentioned
 - Maximum 2 calls
 
-2. search_chunk_tool
+3. search_chunk_tool
 - Use this to retrieve detailed and specific information from documents
 - You may pass an optional 'doc_name' argument to narrow the search from the DB and get a more accurate response.
 - Helps when:
@@ -189,10 +190,12 @@ Your primary goal is to accurately answer the LAST user query using the availabl
 ----------------------------------------
 
 Step 1: Understand the query
+- If there is any keyword related to document structure or folders → use get_structure tool
 - If query is vague or document is unknown → use search_summary_tool
 - If query is specific → you may directly use search_chunk_tool
 
-Step 2: Identify document
+Step 2: Identify documents
+- Use get_structure tool to get list of documents related to any particular topic
 - Use summary tool to select the most relevant document
 - DO NOT rely on assumptions
 
@@ -209,6 +212,8 @@ Step 4: Generate final answer
  IMPORTANT RULES
 ----------------------------------------
 
+- First use get_structure tool to get list of documents related to any particular topic
+- With document list , you may proceed to use summary tool or chunk tool to get the required information and filter out its response with respect to the fetched documents list in get_structure tool call.
 - Query-Lock Precision: Provide only the specific information requested. If a retrieved chunk contains extra data, filter it out and deliver only the direct answer.
 - Brevity by Default: If asked for a "brief" summary, limit the response to 2–3 punchy sentences or high-level bullet points.
 - Zero-Extrapolation: Do not provide "helpful" context, background, or related details unless explicitly triggered by the prompt.
@@ -249,30 +254,34 @@ OUTPUT FORMAT
 
 if __name__ == "__main__": 
     # Example chat history
-    chat_history = [
-        {"role": "user", "content": "Facility Risk Profile Creation"}
-    ]
-    agent = create_chat_agent()
-    response = agent.invoke({
-        "messages": chat_history
-    })
-    final_text = response["messages"][-1].content
+    # chat_history = [
+    #     {"role": "user", "content": "Facility Risk Profile Creation"}
+    # ]
+    # agent = create_chat_agent()
+    # response = agent.invoke({
+    #     "messages": chat_history
+    # })
+    # final_text = response["messages"][-1].content
     
-    result = {
-        "output" : final_text
-    }
+    # result = {
+    #     "output" : final_text
+    # }
 
-    docs: List[Document] = []
+    # docs: List[Document] = []
 
-    for msg in reversed(response["messages"]):
-        if msg.type == "tool" and hasattr(msg, "artifact"):
-            docs = (msg.artifact)
-            break
+    # for msg in reversed(response["messages"]):
+    #     if msg.type == "tool" and hasattr(msg, "artifact"):
+    #         docs = (msg.artifact)
+    #         break
         
-    if len(docs)>0:
-        id,doc_text,doc_name,doc_sharepoint_url,score = docs[0]
-        result["document_name"] = doc_name
-        result["document_sharepoint_url"] = doc_sharepoint_url 
-    print("-------")
-    print(result)
-    # print(final_text)
+    # if len(docs)>0:
+    #     id,doc_text,doc_name,doc_sharepoint_url,score = docs[0]
+    #     result["document_name"] = doc_name
+    #     result["document_sharepoint_url"] = doc_sharepoint_url 
+    # print("-------")
+    # print(result)
+    # # print(final_text)
+
+    print("\n\n")
+    print(get_structure())
+    print("\n\n")

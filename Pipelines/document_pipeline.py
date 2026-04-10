@@ -1,6 +1,9 @@
-﻿import requests
+import requests
 import os
 import psycopg2
+from typing import List
+import tree_generator
+
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
@@ -125,8 +128,11 @@ def download_file(drive_id, item_id, file_name, web_url ):
 
 
 # Recursively get all items in the document library
-def get_all_items(drive_id, folder="root", path=""):
+def get_all_items(drive_id, folder="root", path="") -> List[str]:
     url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/{folder}/children"
+
+    path_strings = []
+
     while url:
         res = requests.get(url, headers=headers)
         data = res.json()
@@ -134,28 +140,40 @@ def get_all_items(drive_id, folder="root", path=""):
             current_path = f"{path}/{item['name']}"
             if "folder" in item:
                 print(f"[DIR] {current_path}")
-                get_all_items(drive_id,  f"items/{item['id']}", current_path)
+                sub_paths = get_all_items(drive_id,  f"items/{item['id']}", current_path)
+                path_strings.extend(sub_paths)
             else:
                 print(f"[FILE] {current_path}")
                 # Cross check if file already exists to avoid duplicates
                 if os.path.exists(os.path.join(DOWNLOAD_FOLDER, item["name"])):
                     print(f"[WARN] Skipping {item['name']} (already exists)")
-                    continue                
+                    continue           
+
                 # [OK] DOWNLOAD PDF, DOCX, AND PPTX FILES
                 if item["name"].lower().endswith(".pdf"):
-                    download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                    path_strings.append("Root/"+current_path)
+                    # download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
                 # elif item["name"].lower().endswith(".docx"):
-                #     download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
-                # elif item["name"].lower().endswith(".pptx") or item["name"].lower().endswith(".ppt"):
-                #     download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                    # path_strings.append("Root/"+current_path)
+                    # download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                elif item["name"].lower().endswith(".pptx") or item["name"].lower().endswith(".ppt"):
+                    path_strings.append("Root/"+current_path)
+                    # download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
        
         url = data.get("@odata.nextLink")
+    
+    return path_strings
 
 def download_documents():
     print("Starting SharePoint document download...")
-    get_all_items(drive_id )
+    path_strings = get_all_items(drive_id )
     print("Download completed.")
     conn.close()
+
+
+    print("\n\nBuilding folder structure...")
+    tree_generator.generate_and_store_structure(path_strings)
+    print("Folder structure built successfully!")
 
 if __name__ == "__main__":
     download_documents()
