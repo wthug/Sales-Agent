@@ -10,8 +10,56 @@ from pydantic import BaseModel , Field
 from pgvector.psycopg2 import register_vector
 import psycopg2
 import os
+import subprocess
 import tempfile
 from dotenv import load_dotenv
+
+def convert_docx_to_pdf(docx_path: str, output_dir: str = None) -> str:
+    """
+    Converts a DOCX file to PDF using docx2pdf (Windows) or headless LibreOffice (Linux).
+    Returns the path to the newly created PDF file.
+    """
+    if not output_dir:
+        output_dir = os.path.dirname(docx_path) or "."
+        
+    base_name = os.path.splitext(os.path.basename(docx_path))[0]
+    pdf_path = os.path.join(output_dir, f"{base_name}.pdf")
+    
+    if os.path.exists(pdf_path):
+        return pdf_path # Already converted
+        
+    print(f"\nStarting PDF conversion for {docx_path}...")
+    
+    # Try docx2pdf (Windows)
+    try:
+        from docx2pdf import convert
+        convert(docx_path, pdf_path)
+        if os.path.exists(pdf_path):
+            print(f"[OK] Successfully created via docx2pdf: {pdf_path}")
+            return pdf_path
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"[WARN] docx2pdf failed: {e}")
+
+    # Fallback to LibreOffice (Linux / macOS)
+    try:
+        subprocess.run(
+            ['soffice', '--headless', '--convert-to', 'pdf', '--outdir', output_dir, docx_path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        if os.path.exists(pdf_path):
+            print(f"[OK] Successfully created via LibreOffice: {pdf_path}")
+            return pdf_path
+    except FileNotFoundError:
+        print("[FAIL] 'soffice' not found. Ensure LibreOffice is installed on Linux systems.")
+    except subprocess.CalledProcessError as e:
+        print(f"[FAIL] Conversion crashed: {e.stderr}")
+        
+    return None
 
 load_dotenv()
 
@@ -183,25 +231,37 @@ def doc_loader_splitter(title):
     current_section = {
         "heading": None,
         "content": "",
-        "tables": []
+        "tables": [],
+        "page": 1
     }
 
+    current_page = 1
+
     for item in doc.iter_inner_content():  # Iterates paras + tables in order
-        # print(item)
+        # 1) Look for page breaks hidden in the XML
+        if hasattr(item, '_element') and hasattr(item._element, 'xml'):
+            xml_str = item._element.xml
+            # Count hard page breaks or "last rendered" breadcrumbs left by MS Word
+            page_breaks = xml_str.count('<w:lastRenderedPageBreak') + xml_str.count('<w:br w:type="page"')
+            if page_breaks > 0:
+                current_page += page_breaks
+
         if hasattr(item, 'style') and 'heading' in item.style.name.lower():
             # Save previous section
             if current_section["heading"]:
                 sections.append(current_section)
-            current_section["heading"] = item.text.strip()
-            current_section["content"] = ""
-            current_section["tables"] = []
+            current_section = {
+                "heading": item.text.strip(),
+                "content": "",
+                "tables": [],
+                "page": current_page
+            }
         elif hasattr(item, 'table'):  # No, item is table
             # Convert table to dict
             table_data = []
             for row in item.rows:
                 row_data = [cell.text.strip() for cell in row.cells]
                 table_data.append(row_data)
-            # print(f"{table_data}\n")
             current_section["tables"].append(table_data)
         else:
             current_section["content"] += item.text + "  "
@@ -266,9 +326,16 @@ def process_single_document(doc_tuple):
     elif doc.endswith('.txt'):
         loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=TextLoader)
     elif doc.endswith('.docx'):
-        loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=Docx2txtLoader)
+        docx_path = os.path.join("downloaded_documents", doc)
+        pdf_path = convert_docx_to_pdf(docx_path)
+        if pdf_path:
+            # Load the new PDF file directly to avoid glob issues with special characters like [ or ]
+            loader = PyPDFLoader(pdf_path)
+        else:
+            print(f"[WARN] Conversion failed, falling back to basic docx loader for {doc}")
+            loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=Docx2txtLoader)
     elif doc.endswith('.pptx') or doc.endswith('.ppt'):
-        loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=UnstructuredPowerPointLoader)
+        loader = DirectoryLoader("downloaded_documents", glob=f"**/{doc}", loader_cls=UnstructuredPowerPointLoader, loader_kwargs={'mode': 'elements'})
     else:
         print(f"Unsupported file type for {doc}. Skipping.")
         return False
@@ -288,36 +355,58 @@ def process_single_document(doc_tuple):
         chunk_overlap=100
     )
     # Chunking 
-    f=True
+    # f=True
     # ....for docx
-    if doc.endswith('.docx'):
-        title = "./downloaded_documents/"+doc
-        sections = doc_loader_splitter(title)
-        if sections:
-            f=False
-            print(f"docx {doc} split by headers.......\n\n")
-            chunks = []
-            for section in sections:
-                pre_chunks = text_splitter.split_text(section['content'])
-                for chunk in pre_chunks:
-                    chunks.append({"text": f"{section['heading']}:\n\n{chunk}", "page": None})
-                table_chunks = prepare_llm_chunks(section['tables'], section['heading'])
-                for tc in table_chunks:
-                    chunks.append({"text": tc, "page": None})
-                
+    # if doc.endswith('.docx'):
+    #     title = "./downloaded_documents/"+doc
+    #     sections = doc_loader_splitter(title)
+    #     if sections:
+    #         f=False
+    #         chunks = []
+    #         for section in sections:
+    #             
+    #             chunks.append({
+    #                 "text": f"{section['heading']}:\n\n{section['content']}",
+    #                 "page": section['page']
+    #             })
+    #             print(f"page: {section['page']}\n")
+    #
+    #             table_chunks = prepare_llm_chunks(section['tables'], section['heading'])
+    #
+    #             for tc in table_chunks:
+    #                 chunks.append({"text": tc, "page": section['page']})
+    #                 print(f"page: {section['page']}\n")
+    #         print(f"docx {doc} split by headers.......\n\n")
+
 
 
     # ....for pdfs , pptx and if docx fails
-    if f:
+    # if f:
         
-        pre_chunks = text_splitter.split_documents(loaded_doc)
-        chunks = []
-        for chunk in pre_chunks:
-            page_num = chunk.metadata.get('page')
-            if page_num is not None:
-                page_num += 1
-            chunks.append({"text": chunk.page_content, "page": page_num})
-        print(f"{doc} split by splitter.......\n\n")
+    pre_chunks = text_splitter.split_documents(loaded_doc)
+    chunks = []
+    for chunk in pre_chunks:
+        # Safely get metadata, defaulting to empty dict if missing
+        metadata = getattr(chunk, 'metadata', {})
+        # PyPDFLoader uses 'page', Unstructured uses 'page_number'
+        page_num = metadata.get('page')
+        if page_num is None:
+            page_num = metadata.get('page_number')
+            
+        if page_num is not None:
+            try:
+                # Explicitly convert to int to handle cases where loaders return a string
+                # Note: PyPDFLoader 'page' is 0-indexed, Unstructured 'page_number' might be 1-indexed.
+                # Keeping your +1 logic here, but you may want to adjust based on the loader.
+                page_num = int(page_num) + 1
+            except (ValueError, TypeError):
+                page_num = None # Fallback if page isn't an integer-like value
+                
+        text_content = getattr(chunk, 'page_content', str(chunk))
+        chunks.append({"text": text_content, "page": page_num})
+        # Use f-string to safely print integers and None types
+        print(f"Extracted Page: {page_num}\n")
+    print(f"{doc} split by splitter.......\n\n")
 
     # for chunk in chunks:
     #     print(f"\n{len(chunk)}\n")

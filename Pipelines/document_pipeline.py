@@ -144,21 +144,28 @@ def get_all_items(drive_id, folder="root", path="") -> List[str]:
                 path_strings.extend(sub_paths)
             else:
                 print(f"[FILE] {current_path}")
+                
+                # Skip files that are not in an ALM folder
+                if "aml" not in [p.lower() for p in path.split("/")]:
+                    print(f"[SKIP] {item['name']} (Not in ALM folder)")
+                    continue
+
                 # Cross check if file already exists to avoid duplicates
                 if os.path.exists(os.path.join(DOWNLOAD_FOLDER, item["name"])):
                     print(f"[WARN] Skipping {item['name']} (already exists)")
-                    continue           
+                    continue  
+
 
                 # [OK] DOWNLOAD PDF, DOCX, AND PPTX FILES
-                if item["name"].lower().endswith(".pdf"):
+                # if item["name"].lower().endswith(".pdf"):
+                #     path_strings.append("Root/"+current_path)
+                #     download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                if item["name"].lower().endswith(".docx"):
                     path_strings.append("Root/"+current_path)
-                    # download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
-                # elif item["name"].lower().endswith(".docx"):
-                    # path_strings.append("Root/"+current_path)
-                    # download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                    download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
                 elif item["name"].lower().endswith(".pptx") or item["name"].lower().endswith(".ppt"):
                     path_strings.append("Root/"+current_path)
-                    # download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
+                    download_file(drive_id, item["id"], item["name"], item.get("webUrl", ""))
        
         url = data.get("@odata.nextLink")
     
