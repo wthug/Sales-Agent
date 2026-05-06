@@ -6,7 +6,14 @@ import psycopg2.extras
 from functools import wraps
 from flask import Flask, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+from flask import send_file
 from sql_script import Database
+import csv
+import pandas as pd
+from Agent.batch_agent import create_batch_agent
+
+batch_agent = create_batch_agent()
 
 from Agent.rag_agent import create_chat_agent
 from langchain_core.documents import Document
@@ -207,7 +214,7 @@ def chat_endpoint():
 
         response = agent.invoke({
             "messages": messages,
-            "message_id" : assistant_id
+            "message_id" : assistant_id,
         })
         # print(response)
         # ✅ Final LLM response
@@ -247,6 +254,259 @@ def chat_endpoint():
         return jsonify({
             "error": str(e)
         }), 500    
+
+@app.route("/api/batch_upload", methods=["POST", "OPTIONS"])
+@require_token
+def batch_upload():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part in the request"}), 400
+        
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+        
+    if not file.filename.endswith('.csv'):
+        return jsonify({"error": "Only .csv files are allowed"}), 400
+        
+    filename = secure_filename(file.filename)
+    
+    # Ensure directory exists
+    if not os.path.exists("downloaded_documents"):
+        os.makedirs("downloaded_documents")
+        
+    file_path = os.path.join("downloaded_documents", filename)
+    file.save(file_path)
+    
+    # Extract additional fields if provided
+    folder_name = request.form.get('folder_name', '')
+
+    output_filename = f"output_{filename.rsplit('.', 1)[0]}.xlsx"
+    user_id = getattr(request, 'user_id', None)
+    
+    conn = Database.get_connection()
+    document_id = None
+    task_id = None
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                
+                cur.execute("""
+                    INSERT INTO batch_tasks (user_id, input_filename, output_filename)
+                    VALUES (%s, %s, %s)
+                    RETURNING task_id;
+                """, (user_id, filename, output_filename))
+                task_id = cur.fetchone()[0]
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print("DB Insert Error:", e)
+        finally:
+            Database.put_connection(conn)
+
+    try:
+        rows = _extract_rows_from_file(file_path)
+        if not rows:
+            return jsonify({"error": "No data rows found in the file. Ensure the file has 'Item' and 'Specification' columns."}), 400
+        
+        results = []
+        total = len(rows)
+        fn = folder_name.strip() if folder_name else None
+        
+        for idx, row_data in enumerate(rows):
+            item = row_data['item']
+            spec = row_data['specification']
+            question = f"Item: {item}\nSpecification: {spec}"
+            
+            row_result = {
+                "Row": idx + 1,
+                "Item": item,
+                "Specification": spec,
+            }
+            
+            for skip_n in range(3):
+                try:
+                    augmented_question = (
+                        f"{question}\n\n"
+                        f"[CONTEXT: folder_name={fn}, file_name={output_filename}, index={idx}, skip={skip_n}]"
+                    )
+                    response = batch_agent.invoke({
+                        "messages": [{"role": "user", "content": augmented_question}],
+                    })
+                    
+                    ai_text = response["messages"][-1].content
+                except Exception as e:
+                    ai_text = f"Error: {str(e)}"
+                
+                row_result[f"AI Response {skip_n + 1}"] = ai_text
+            
+            results.append(row_result)
+        
+        # Fetch metadata and append to results
+        conn = Database.get_connection()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT index, skip, metadata FROM metadata WHERE file_name = %s ORDER BY index ASC, skip ASC", 
+                        (output_filename,)
+                    )
+                    metadata_rows = cur.fetchall()
+                    
+                    # Map metadata by (index, skip)
+                    metadata_dict = {}
+                    for row in metadata_rows:
+                        key = (row[0], row[1])  # (index, skip)
+                        metadata_dict[key] = row[2]
+                    
+                    def format_meta(raw_meta):
+                        if raw_meta and isinstance(raw_meta, list):
+                            parts = []
+                            for i, doc in enumerate(raw_meta, 1):
+                                doc_name = doc.get("document_name", "N/A")
+                                doc_url = doc.get("document_sharepoint_url", "N/A")
+                                folder = doc.get("folder_name", "N/A")
+                                row_idx = doc.get("row_index", "N/A")
+                                response = doc.get("Response", "N/A")
+                                question = doc.get("Question", "N/A")
+                                parts.append(
+                                    f"Source {i}:\n"
+                                    f"  Document: {doc_name}\n"
+                                    f"  URL: {doc_url}\n"
+                                    f"  Folder: {folder}\n"
+                                    f"  Question: {question}\n"
+                                    f"  Response: {response}\n"
+                                    f"  Row Index: {row_idx}\n"
+                                    f"  Similarity: {similarity}\n"
+                                )
+
+                            return "\n\n".join(parts)
+                        return ""
+                    
+                    for res in results:
+                        row_idx = res["Row"] - 1
+                        for skip_n in range(3):
+                            raw_meta = metadata_dict.get((row_idx, skip_n), None)
+                            res[f"Metadata {skip_n + 1}"] = format_meta(raw_meta)
+            except Exception as e:
+                print("Error fetching metadata:", e)
+            finally:
+                Database.put_connection(conn)
+            
+        if not os.path.exists("processed_documents"):
+            os.makedirs("processed_documents")
+            
+        output_path = os.path.join("processed_documents", output_filename)
+        
+        df = pd.DataFrame(results)
+        df.to_excel(output_path, index=False)
+        
+        # Update status
+        conn = Database.get_connection()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE batch_tasks SET status = 'successful' WHERE task_id = %s", (task_id,))
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+            finally:
+                Database.put_connection(conn)
+                
+        return jsonify({"success": True, "task_id": task_id})
+        
+    except Exception as e:
+        traceback.print_exc()
+        if task_id:
+            conn = Database.get_connection()
+            if conn:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE batch_tasks SET status = 'failed' WHERE task_id = %s", (task_id,))
+                    conn.commit()
+                except:
+                    pass
+                finally:
+                    Database.put_connection(conn)
+        return jsonify({"error": f"Failed to process batch: {str(e)}"}), 500
+
+def _extract_rows_from_file(file_path: str) -> list:
+    rows = []
+    _, ext = os.path.splitext(file_path)
+    ext = ext.lower()
+
+    def _parse_row(headers, cells):
+        lower_headers = [str(h).strip().lower() for h in headers]
+        cell_map = {
+            lower_headers[i]: str(cells[i]).strip()
+            for i in range(min(len(lower_headers), len(cells)))
+        }
+        item = cell_map.get('item', cells[0].strip() if cells else '')
+        spec  = cell_map.get('specification', cells[1].strip() if len(cells) > 1 else '')
+        return item, spec
+
+    if ext == '.csv':
+        with open(file_path, mode='r', encoding='utf-8-sig') as f:
+            reader = csv.reader(f)
+            headers = None
+            for raw_row in reader:
+                if not any(raw_row):
+                    continue
+                if headers is None:
+                    headers = raw_row
+                    continue
+                item, spec = _parse_row(headers, raw_row)
+                rows.append({'item': item, 'specification': spec})
+
+    return rows
+
+@app.route("/api/batch_history", methods=["GET", "OPTIONS"])
+@require_token
+def batch_history():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    conn = Database.get_connection()
+    if not conn: return jsonify({"error": "Database connection failed"}), 500
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT task_id, input_filename, output_filename, status, created_at 
+                FROM batch_tasks 
+                WHERE user_id = %s 
+                ORDER BY created_at DESC
+            """, (request.user_id,))
+            return jsonify(cur.fetchall()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        Database.put_connection(conn)
+
+@app.route("/api/batch_download_file/<int:task_id>", methods=["GET", "OPTIONS"])
+@require_token
+def batch_download_file(task_id):
+    if request.method == "OPTIONS": return jsonify({}), 200
+    conn = Database.get_connection()
+    if not conn: return jsonify({"error": "Database connection failed"}), 500
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT output_filename FROM batch_tasks WHERE task_id = %s AND user_id = %s", (task_id, request.user_id))
+            row = cur.fetchone()
+            if not row: return jsonify({"error": "Task not found"}), 404
+            
+        file_path = os.path.join("processed_documents", row['output_filename'])
+        if not os.path.exists(file_path):
+            return jsonify({"error": "File not found on disk"}), 404
+            
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=row['output_filename'],
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        Database.put_connection(conn)
 
 if __name__ == "__main__":
    

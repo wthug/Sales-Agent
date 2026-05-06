@@ -27,10 +27,10 @@ def main():
     if menu == "📄 Upload Documents":
         st.title("📄 Document Upload")
         st.write("Upload files to build your Sales Agent knowledge base.")
-        st.subheader("Upload Documents to Store (PDF / Docx)")
+        st.subheader("Upload Documents to Store (PDF)")
         user_input = st.file_uploader(
             "Upload a document to store in the knowledge base:",
-            type=["pdf", "docx"],
+            type=["pdf"],
             accept_multiple_files=False,
             key="reference_docs"
         )

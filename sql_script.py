@@ -108,6 +108,7 @@ class Database:
                         document_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                         file_name TEXT NOT NULL,
                         sharepoint_url TEXT,
+                        folder_name TEXT,
                         folder_id INT REFERENCES folders(folder_id),
                         file_type TEXT,
                         file_size BIGINT,
@@ -116,6 +117,7 @@ class Database:
                         checksum TEXT,
                         ingestion_status TEXT DEFAULT 'pending',
                         indexed BOOLEAN DEFAULT FALSE,
+                        processing_type TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
@@ -153,6 +155,52 @@ class Database:
                     );
                 """)
                 print("[OK] all_document_chunks table initialized")
+
+                # batch_questions table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS batch_questions (
+                        que_id SERIAL PRIMARY KEY,
+                        document_id UUID REFERENCES documents(document_id),
+                        question TEXT,
+                        response TEXT,
+                        embeddings VECTOR(384),
+                        folder_name TEXT,
+                        row_index INT,
+                        document_name TEXT,
+                        document_sharepoint_url TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                print("[OK] batch_questions table initialized")
+
+                # batch_tasks table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS batch_tasks (
+                        task_id SERIAL PRIMARY KEY,
+                        user_id INT REFERENCES users(id) ON DELETE CASCADE,
+                        input_filename TEXT,
+                        output_filename TEXT,
+                        status TEXT DEFAULT 'pending',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                print("[OK] batch_tasks table initialized")
+
+
+                # metadata table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS metadata (
+                        chunk_id SERIAL PRIMARY KEY,
+                        file_name TEXT,
+                        index INT,
+                        skip INT DEFAULT 0,
+                        metadata JSONB,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                print("[OK] metadata table initialized")
+
+
 
             conn.commit()
             print("[OK] All database tables initialized successfully!")

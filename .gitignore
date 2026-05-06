@@ -2,7 +2,9 @@
 Documents
 /Pipelines/downloaded_documents/
 /frontend-react/node_modules/
-
+/processed_documents/
+/test_results/
+/downloaded_documents
 # node_modules/
 __pycache__/
 dist/

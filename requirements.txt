@@ -13,3 +13,6 @@ PyJWT
 unstructured
 python-pptx
 python-magic
+celery
+redis
+openpyxl

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Settings, LogOut, MessageSquare } from 'lucide-react';
+import { Send, Bot, User, Settings, LogOut, MessageSquare, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export default function Chat() {
@@ -313,12 +313,18 @@ export default function Chat() {
           </div>
         </div>
 
-        <div className="px-4 py-3 border-b border-gray-100 shrink-0">
+        <div className="px-4 py-3 border-b border-gray-100 shrink-0 space-y-3">
+          <button onClick={() => navigate('/batch-upload')} className="w-full flex items-center justify-center gap-2 rounded-xl bg-white border border-gray-200 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+            <FileText className="h-4 w-4" />
+            Batch Processing
+          </button>
           <button onClick={startNewChat} className="w-full flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-700 transition-colors">
             <MessageSquare className="h-4 w-4" />
             New Chat
           </button>
         </div>
+
+
 
         <div className="flex-1 overflow-y-auto py-4">
           <div className="px-4 text-xs font-medium text-gray-400 uppercase tracking-wider mb-3">Recent Chats</div>
