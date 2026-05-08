@@ -15,6 +15,9 @@ from Agent.batch_agent import create_batch_agent
 
 batch_agent = create_batch_agent()
 
+from Agent.category_graph import CategoryGraph
+category_graph = CategoryGraph()
+
 from Agent.rag_agent import create_chat_agent
 from langchain_core.documents import Document
 from typing import List
@@ -325,21 +328,12 @@ def batch_upload():
                 "Specification": spec,
             }
             
-            for skip_n in range(3):
-                try:
-                    augmented_question = (
-                        f"{question}\n\n"
-                        f"[CONTEXT: folder_name={fn}, file_name={output_filename}, index={idx}, skip={skip_n}]"
-                    )
-                    response = batch_agent.invoke({
-                        "messages": [{"role": "user", "content": augmented_question}],
-                    })
-                    
-                    ai_text = response["messages"][-1].content
-                except Exception as e:
-                    ai_text = f"Error: {str(e)}"
-                
-                row_result[f"AI Response {skip_n + 1}"] = ai_text
+            try:
+                ai_text = category_graph.process_query_row(fn, question)
+            except Exception as e:
+                ai_text = f"Error: {str(e)}"
+            
+            row_result["AI Response"] = ai_text
             
             results.append(row_result)
         
@@ -386,9 +380,8 @@ def batch_upload():
                     
                     for res in results:
                         row_idx = res["Row"] - 1
-                        for skip_n in range(3):
-                            raw_meta = metadata_dict.get((row_idx, skip_n), None)
-                            res[f"Metadata {skip_n + 1}"] = format_meta(raw_meta)
+                        raw_meta = metadata_dict.get((row_idx, 0), None)
+                        res["Metadata"] = format_meta(raw_meta)
             except Exception as e:
                 print("Error fetching metadata:", e)
             finally:

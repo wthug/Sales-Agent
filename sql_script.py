@@ -200,7 +200,19 @@ class Database:
                 """)
                 print("[OK] metadata table initialized")
 
-
+                # batch_categories table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS batch_categories (
+                        cat_id SERIAL PRIMARY KEY,
+                        folder_name TEXT NOT NULL,
+                        cat_name TEXT NOT NULL,
+                        description TEXT,
+                        context JSONB DEFAULT '[]'::jsonb,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE (folder_name, cat_name)
+                    );
+                """)
+                print("[OK] batch_categories table initialized")
 
             conn.commit()
             print("[OK] All database tables initialized successfully!")
