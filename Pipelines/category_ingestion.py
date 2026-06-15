@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from Agent.category_graph import CategoryGraph
 from sql_script import Database
 
-def process_row(graph: CategoryGraph, folder_name: str, row_data: list, row_index: int, document_name: str, question_cols: int, response_cols: int):
+def process_row(graph: CategoryGraph, folder_name: str, row_data: list, row_index: int, document_name: str, document_sharepoint_url: str, question_cols: int, response_cols: int):
     """
     Parses the row_data according to layout and runs it through the LangGraph categorizer.
     """
@@ -50,6 +50,7 @@ def process_row(graph: CategoryGraph, folder_name: str, row_data: list, row_inde
         question=question_text,
         response=response_text,
         document_name=document_name,
+        document_sharepoint_url=document_sharepoint_url,
         row_index=row_index
     )
 
@@ -58,7 +59,7 @@ def process_row(graph: CategoryGraph, folder_name: str, row_data: list, row_inde
     print(f" -> Assigned to: {', '.join(cat_names)}")
 
 
-def ingest_csv(graph: CategoryGraph, folder_name: str, file_path: str, question_cols: int, response_cols: int):
+def ingest_csv(graph: CategoryGraph, folder_name: str, file_path: str, document_sharepoint_url: str, question_cols: int, response_cols: int):
     doc_name = os.path.basename(file_path)
     print(f"Processing CSV: {file_path}")
     try:
@@ -66,12 +67,12 @@ def ingest_csv(graph: CategoryGraph, folder_name: str, file_path: str, question_
             reader = csv.reader(file)
             row_idx = 0
             for row in reader:
-                process_row(graph, folder_name, row, row_idx, doc_name, question_cols, response_cols)
+                process_row(graph, folder_name, row, row_idx, doc_name, document_sharepoint_url, question_cols, response_cols)
                 row_idx += 1
     except Exception as e:
         print(f"Error reading {file_path}: {e}")
 
-def ingest_docx(graph: CategoryGraph, folder_name: str, file_path: str, question_cols: int, response_cols: int):
+def ingest_docx(graph: CategoryGraph, folder_name: str, file_path: str, document_sharepoint_url: str, question_cols: int, response_cols: int):
     doc_name = os.path.basename(file_path)
     print(f"Processing DOCX: {file_path}")
     try:
@@ -80,12 +81,12 @@ def ingest_docx(graph: CategoryGraph, folder_name: str, file_path: str, question
         for table in doc.tables:
             for row in table.rows:
                 row_data = [cell.text.strip() for cell in row.cells]
-                process_row(graph, folder_name, row_data, row_idx, doc_name, question_cols, response_cols)
+                process_row(graph, folder_name, row_data, row_idx, doc_name, document_sharepoint_url, question_cols, response_cols)
                 row_idx += 1
     except Exception as e:
         print(f"Error reading {file_path}: {e}")
 
-def ingest_xlsx(graph: CategoryGraph, folder_name: str, file_path: str, question_cols: int, response_cols: int, sheet_configs=None):
+def ingest_xlsx(graph: CategoryGraph, folder_name: str, file_path: str, document_sharepoint_url: str, question_cols: int, response_cols: int, sheet_configs=None):
     import openpyxl
     doc_name = os.path.basename(file_path)
     print(f"Processing XLSX: {file_path}")
@@ -102,14 +103,14 @@ def ingest_xlsx(graph: CategoryGraph, folder_name: str, file_path: str, question
             row_idx = 0
             for row in ws.iter_rows(values_only=True):
                 row_data = [str(cell) if cell is not None else "" for cell in row]
-                process_row(graph, folder_name, row_data, row_idx, doc_name, s_qcols, s_rcols)
+                process_row(graph, folder_name, row_data, row_idx, doc_name, document_sharepoint_url, s_qcols, s_rcols)
                 row_idx += 1
         wb.close()
     except Exception as e:
         print(f"Error reading {file_path}: {e}")
 
 
-def process_file(doc_name: str, folder_name: str, question_cols: int, response_cols: int, sheet_configs=None):
+def process_file(doc_name: str, folder_name: str, document_sharepoint_url: str, question_cols: int, response_cols: int, sheet_configs=None):
     file_path = os.path.join("downloaded_documents", doc_name)
     
     if not os.path.exists(file_path):
@@ -125,11 +126,11 @@ def process_file(doc_name: str, folder_name: str, question_cols: int, response_c
     ext = ext.lower()
     
     if ext == '.csv':
-        ingest_csv(graph, folder_name, file_path, question_cols, response_cols)
+        ingest_csv(graph, folder_name, file_path, document_sharepoint_url, question_cols, response_cols)
     elif ext == '.docx':
-        ingest_docx(graph, folder_name, file_path, question_cols, response_cols)
+        ingest_docx(graph, folder_name, file_path, document_sharepoint_url, question_cols, response_cols)
     elif ext == '.xlsx':
-        ingest_xlsx(graph, folder_name, file_path, question_cols, response_cols, sheet_configs)
+        ingest_xlsx(graph, folder_name, file_path, document_sharepoint_url, question_cols, response_cols, sheet_configs)
     else:
         print(f"Unsupported file format: {ext}")
 
@@ -144,6 +145,8 @@ if __name__ == "__main__":
     if not folder_name:
         print("Folder name is required for category isolation.")
         sys.exit(0)
+
+    document_sharepoint_url = input("Enter the SharePoint URL for this document: ").strip()
 
     _, ext = os.path.splitext(doc_name)
     sheet_configs = None
@@ -181,6 +184,7 @@ if __name__ == "__main__":
     process_file(
         doc_name=doc_name,
         folder_name=folder_name,
+        document_sharepoint_url=document_sharepoint_url,
         question_cols=question_cols,
         response_cols=response_cols,
         sheet_configs=sheet_configs

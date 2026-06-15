@@ -40,6 +40,7 @@ class IngestionState(TypedDict):
     question: str
     response: str
     document_name: str
+    document_sharepoint_url: str
     row_index: int
     folder_name: str
     existing_categories: List[Dict[str, str]]
@@ -102,6 +103,7 @@ def update_db_node(state: IngestionState) -> IngestionState:
                 "question": state["question"],
                 "response": state["response"],
                 "document_name": state["document_name"],
+                "document_sharepoint_url": state.get("document_sharepoint_url", "N/A"),
                 "row_index": state["row_index"]
             }
 
@@ -186,25 +188,66 @@ def generate_answer_node(state: QueryState) -> QueryState:
         temperature=0.0
     )
     
-    sys_prompt = f"""You are a Senior Solutions Consultant. Use the following context to answer the user's question. 
-The context consists of past questions and their validated responses from the '{state['assigned_category']}' category.
+    sys_prompt = f"""You are a Senior Solutions Consultant. Use ONLY the provided context to answer the user's requirement.
+
+The context consists of validated historical responses from the '{state['assigned_category']}' category.
 
 Context:
 {json.dumps(state['context_data'], indent=2)}
 
-Answer the user's question based ONLY on the provided context. If the context does not contain relevant information, state that clearly.
+IMPORTANT:
+- Answer ONLY from the provided context.
+- Do NOT assume capabilities that are not explicitly mentioned.
+- Do NOT use external knowledge.
+- If the requirement is not covered in the context, respond exactly:
+  "No context given for this requirement."
 
-### RESPONSE FORMAT (STRICT)
+--------------------------------------------------
+RESPONSE FORMAT (STRICT)
+--------------------------------------------------
 
-Line 1:
-- Yes / No / Fully Aligned / Needs Modification / Not Aligned
+Summary: (Maximum 1-2 concise sentences)
 
-Then follow with a structured response:
-1. Answer the question about availability of the feature.
-2. Explain a bit about how we handle this requirement.
-3. Include parts of the value proposition it will bring to the client based on the approach we follow (this is the part which attracts the customer and makes the answer impressive).
-4. Conclude with a clear summary."""
+Clearly state whether the requirement is:
+- Fully Aligned
+- Partially Aligned
+- Not Aligned
 
+Also briefly mention the directly relevant capability only.
+
+How we handle this requirement:
+
+- No limit on length of answer 
+- focused on the requirement and the capability
+- Keep bullets highly specific to the requirement
+- Avoid repeating similar capabilities
+
+Business Value / Benefit: (Maximum 2 concise lines)
+
+Mention only direct business impact such as:
+- reduced manual effort
+- improved operational efficiency
+- better compliance monitoring
+- faster processing
+- improved review accuracy
+- reduced false positives
+
+--------------------------------------------------
+IMPORTANT RULES
+--------------------------------------------------
+
+FOCUS ONLY ON:
+1. Requirement alignment
+2. Direct capability mapping
+3. Explicit limitation if present in context
+
+STYLE RULES:
+- Use simple business language
+- Be concise and precise
+- Avoid over-explaining
+- Avoid marketing-style wording
+- Total response should ideally stay under 150 words
+"""
     messages = [
         SystemMessage(content=sys_prompt),
         HumanMessage(content=state['question'])
@@ -274,12 +317,13 @@ class CategoryGraph:
 
         return builder.compile()
 
-    def process_ingestion_row(self, folder_name: str, question: str, response: str, document_name: str, row_index: int):
+    def process_ingestion_row(self, folder_name: str, question: str, response: str, document_name: str, document_sharepoint_url: str, row_index: int):
         folder_cats = self.categories.get(folder_name, [])
         initial_state: IngestionState = {
             "question": question,
             "response": response,
             "document_name": document_name,
+            "document_sharepoint_url": document_sharepoint_url,
             "row_index": row_index,
             "folder_name": folder_name,
             "existing_categories": folder_cats,
@@ -316,4 +360,8 @@ class CategoryGraph:
         }
         
         result = self.query_graph.invoke(initial_state)
-        return result.get("final_answer", "Failed to generate answer.")
+        return {
+            "answer": result.get("final_answer", "Failed to generate answer."),
+            "context": result.get("context_data", []),
+            "category": result.get("assigned_category", "None")
+        }

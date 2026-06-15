@@ -329,63 +329,40 @@ def batch_upload():
             }
             
             try:
-                ai_text = category_graph.process_query_row(fn, question)
+                query_res = category_graph.process_query_row(fn, question)
+                if isinstance(query_res, dict):
+                    ai_text = query_res["answer"]
+                    context_data = query_res["context"]
+                    assigned_cat = query_res["category"]
+                else:
+                    ai_text = query_res
+                    context_data = []
+                    assigned_cat = "N/A"
             except Exception as e:
                 ai_text = f"Error: {str(e)}"
+                context_data = []
+                assigned_cat = "N/A"
             
             row_result["AI Response"] = ai_text
             
+            # Format Metadata
+            meta_parts = [f"Assigned Category: {assigned_cat}"]
+            for i, doc in enumerate(context_data, 1):
+                doc_name = doc.get("document_name", "N/A")
+                doc_url = doc.get("document_sharepoint_url", "N/A")
+                row_idx = doc.get("row_index", "N/A")
+                meta_parts.append(
+                    f"Source {i}:\n"
+                    f"  Document Name: {doc_name}\n"
+                    f"  Document SharePoint URL: {doc_url}\n"
+                    f"  Row Index: {row_idx}"
+                )
+            
+            row_result["Metadata"] = "\n\n".join(meta_parts)
+            
             results.append(row_result)
         
-        # Fetch metadata and append to results
-        conn = Database.get_connection()
-        if conn:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT index, skip, metadata FROM metadata WHERE file_name = %s ORDER BY index ASC, skip ASC", 
-                        (output_filename,)
-                    )
-                    metadata_rows = cur.fetchall()
-                    
-                    # Map metadata by (index, skip)
-                    metadata_dict = {}
-                    for row in metadata_rows:
-                        key = (row[0], row[1])  # (index, skip)
-                        metadata_dict[key] = row[2]
-                    
-                    def format_meta(raw_meta):
-                        if raw_meta and isinstance(raw_meta, list):
-                            parts = []
-                            for i, doc in enumerate(raw_meta, 1):
-                                doc_name = doc.get("document_name", "N/A")
-                                doc_url = doc.get("document_sharepoint_url", "N/A")
-                                folder = doc.get("folder_name", "N/A")
-                                row_idx = doc.get("row_index", "N/A")
-                                response = doc.get("Response", "N/A")
-                                question = doc.get("Question", "N/A")
-                                parts.append(
-                                    f"Source {i}:\n"
-                                    f"  Document: {doc_name}\n"
-                                    f"  URL: {doc_url}\n"
-                                    f"  Folder: {folder}\n"
-                                    f"  Question: {question}\n"
-                                    f"  Response: {response}\n"
-                                    f"  Row Index: {row_idx}\n"
-                                    f"  Similarity: {similarity}\n"
-                                )
 
-                            return "\n\n".join(parts)
-                        return ""
-                    
-                    for res in results:
-                        row_idx = res["Row"] - 1
-                        raw_meta = metadata_dict.get((row_idx, 0), None)
-                        res["Metadata"] = format_meta(raw_meta)
-            except Exception as e:
-                print("Error fetching metadata:", e)
-            finally:
-                Database.put_connection(conn)
             
         if not os.path.exists("processed_documents"):
             os.makedirs("processed_documents")
